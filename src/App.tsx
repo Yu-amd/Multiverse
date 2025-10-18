@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 function App() {
@@ -25,6 +25,16 @@ function App() {
   const [isMobile, setIsMobile] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
   const [isROGAllyX, setIsROGAllyX] = useState(false);
+  
+  // Ref for auto-scrolling chat messages
+  const chatMessagesRef = useRef<HTMLDivElement>(null);
+  
+  // Function to scroll chat messages to bottom
+  const scrollToBottom = () => {
+    if (chatMessagesRef.current) {
+      chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
+    }
+  };
 
   // Responsive design detection
   useEffect(() => {
@@ -61,6 +71,25 @@ function App() {
     
     return () => window.removeEventListener('resize', checkScreenSize);
   }, []);
+
+  // Auto-scroll when thinking content updates
+  useEffect(() => {
+    if (isThinking && thinkingContent) {
+      scrollToBottom();
+    }
+  }, [isThinking, thinkingContent]);
+
+  // Auto-scroll when response content updates
+  useEffect(() => {
+    if (responseContent) {
+      scrollToBottom();
+    }
+  }, [responseContent]);
+
+  // Auto-scroll when messages change
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
@@ -445,7 +474,7 @@ if __name__ == "__main__":
             </div>
           </div>
 
-          <div className="chat-messages">
+          <div className="chat-messages" ref={chatMessagesRef}>
             {messages.map((message, index) => (
               <div key={index} className={`message ${message.role}`}>
                 <div>{message.content}</div>

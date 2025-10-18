@@ -109,6 +109,7 @@ body {
   font-size: 1rem;
   min-height: 0;
   max-height: calc(100% - 120px);
+  scroll-behavior: smooth;
 }
 
 /* ROG Ally X Chat Messages */
