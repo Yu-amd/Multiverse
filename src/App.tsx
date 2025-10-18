@@ -442,24 +442,6 @@ if __name__ == "__main__":
               >
                 🗑️ Clear
               </button>
-              <button 
-                className="control-button"
-                onClick={() => {
-                  const newValue = !localStorage.getItem('force-rog-ally');
-                  localStorage.setItem('force-rog-ally', newValue.toString());
-                  window.location.reload();
-                }}
-              >
-                🎮 ROG Ally
-              </button>
-              <div style={{ 
-                fontSize: '0.8rem', 
-                color: '#888', 
-                marginTop: '5px',
-                textAlign: 'center'
-              }}>
-                Layout: {isROGAllyX ? 'ROG Ally X' : isMobile ? 'Mobile' : isTablet ? 'Tablet' : 'Desktop'}
-              </div>
             </div>
           </div>
 
@@ -721,6 +703,39 @@ if __name__ == "__main__":
                 onChange={(e) => setTopP(parseFloat(e.target.value))}
                 style={{ width: '100%' }}
               />
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#e0e0e0' }}>
+                Layout Settings
+              </label>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '10px',
+                marginBottom: '10px'
+              }}>
+                <input
+                  type="checkbox"
+                  id="rog-ally-toggle"
+                  checked={localStorage.getItem('force-rog-ally') === 'true'}
+                  onChange={(e) => {
+                    localStorage.setItem('force-rog-ally', e.target.checked.toString());
+                    window.location.reload();
+                  }}
+                  style={{ transform: 'scale(1.2)' }}
+                />
+                <label htmlFor="rog-ally-toggle" style={{ color: '#e0e0e0', cursor: 'pointer' }}>
+                  🎮 Force ROG Ally X Layout (Bigger Fonts)
+                </label>
+              </div>
+              <div style={{ 
+                fontSize: '0.8rem', 
+                color: '#888',
+                marginTop: '5px'
+              }}>
+                Current Layout: {isROGAllyX ? 'ROG Ally X' : isMobile ? 'Mobile' : isTablet ? 'Tablet' : 'Desktop'}
+              </div>
             </div>
           </div>
         </div>
