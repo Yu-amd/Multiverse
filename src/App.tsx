@@ -32,17 +32,28 @@ function App() {
       const width = window.innerWidth;
       const height = window.innerHeight;
       
-      // ROG Ally X: 1920x1080 or similar handheld gaming device
-      setIsROGAllyX((width >= 1920 && height >= 1080) || 
-                   (width >= 1080 && height >= 1920) ||
-                   (width >= 1280 && height >= 720) ||
-                   (width >= 720 && height >= 1280));
+      // ROG Ally X: Simplified detection - any reasonably large screen
+      // This will trigger for most desktop/laptop screens and gaming devices
+      const isROGAllyXSize = width >= 1024 || height >= 1024;
+      
+      // For testing: Force ROG Ally X layout
+      const forceROGAllyX = window.location.search.includes('rog-ally') || 
+                           localStorage.getItem('force-rog-ally') === 'true';
+      
+      setIsROGAllyX(isROGAllyXSize || forceROGAllyX);
       
       // Mobile: width < 768px OR height < 600px (for handheld devices like ROG Ally)
-      setIsMobile((width < 768 || height < 600) && !isROGAllyX);
+      setIsMobile((width < 768 || height < 600) && !isROGAllyXSize && !forceROGAllyX);
       
       // Tablet: 768px <= width < 1024px AND height >= 600px
-      setIsTablet(width >= 768 && width < 1024 && height >= 600 && !isROGAllyX);
+      setIsTablet(width >= 768 && width < 1024 && height >= 600 && !isROGAllyXSize && !forceROGAllyX);
+      
+      // Debug logging
+      console.log('Screen size:', width, 'x', height);
+      console.log('ROG Ally X detected:', isROGAllyXSize || forceROGAllyX);
+      console.log('Layout:', isROGAllyXSize || forceROGAllyX ? 'ROG Ally X' : 
+                  (width < 768 || height < 600) ? 'Mobile' : 
+                  (width >= 768 && width < 1024) ? 'Tablet' : 'Desktop');
     };
 
     checkScreenSize();
@@ -431,6 +442,24 @@ if __name__ == "__main__":
               >
                 🗑️ Clear
               </button>
+              <button 
+                className="control-button"
+                onClick={() => {
+                  const newValue = !localStorage.getItem('force-rog-ally');
+                  localStorage.setItem('force-rog-ally', newValue.toString());
+                  window.location.reload();
+                }}
+              >
+                🎮 ROG Ally
+              </button>
+              <div style={{ 
+                fontSize: '0.8rem', 
+                color: '#888', 
+                marginTop: '5px',
+                textAlign: 'center'
+              }}>
+                Layout: {isROGAllyX ? 'ROG Ally X' : isMobile ? 'Mobile' : isTablet ? 'Tablet' : 'Desktop'}
+              </div>
             </div>
           </div>
 
