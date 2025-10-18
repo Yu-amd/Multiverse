@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
+import { metricsCollector, ModelMetrics, SystemMetrics, CompositeMetrics } from './metrics';
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -16,6 +17,11 @@ function App() {
   const [thinkingContent, setThinkingContent] = useState('');
   const [responseContent, setResponseContent] = useState('');
   const [showApiInfo, setShowApiInfo] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
+  const [activeDashboardTab, setActiveDashboardTab] = useState('model');
+  const [modelMetrics, setModelMetrics] = useState<ModelMetrics | null>(null);
+  const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
+  const [compositeMetrics, setCompositeMetrics] = useState<CompositeMetrics | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
   const [isROGAllyX, setIsROGAllyX] = useState(false);
@@ -29,6 +35,26 @@ function App() {
       chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
     }
   };
+
+  // Initialize metrics collection
+  useEffect(() => {
+    metricsCollector.startCollection(2000); // Update every 2 seconds
+    
+    // Update metrics state
+    const updateMetrics = () => {
+      setModelMetrics(metricsCollector.getModelMetrics());
+      setSystemMetrics(metricsCollector.getSystemMetrics());
+      setCompositeMetrics(metricsCollector.getCompositeMetrics());
+    };
+    
+    updateMetrics();
+    const interval = setInterval(updateMetrics, 2000);
+    
+    return () => {
+      clearInterval(interval);
+      metricsCollector.stopCollection();
+    };
+  }, []);
 
   // Responsive design detection
   useEffect(() => {
@@ -98,6 +124,10 @@ function App() {
     const currentInput = inputMessage;
     setInputMessage('');
     setIsLoading(true);
+    
+    // Record start time for metrics
+    const startTime = Date.now();
+    const firstTokenTime = Date.now();
     
     try {
       // Determine endpoint
@@ -228,6 +258,21 @@ function App() {
         },
       ]);
 
+      // Record metrics for successful inference
+      const endTime = Date.now();
+      const totalTime = endTime - startTime;
+      const firstTokenLatency = firstTokenTime - startTime;
+      const tokensPerSecond = accumulatedContent.length / (totalTime / 1000);
+      
+      metricsCollector.recordInference(
+        currentInput.length,
+        accumulatedContent.length,
+        totalTime,
+        firstTokenLatency,
+        tokensPerSecond,
+        'FP16' // Default quantization format
+      );
+
     } catch (error) {
       console.error('Error sending message:', error);
       setMessages(prev => [
@@ -238,6 +283,9 @@ function App() {
           timestamp: new Date(),
         },
       ]);
+      
+      // Record error metrics
+      metricsCollector.recordError();
     } finally {
       setIsLoading(false);
       setIsThinking(false);
@@ -452,6 +500,12 @@ if __name__ == "__main__":
                 onClick={() => setShowSettings(true)}
               >
                 ⚙️ Settings
+              </button>
+              <button 
+                className="control-button"
+                onClick={() => setShowDashboard(true)}
+              >
+                📊 Dashboard
               </button>
               <button 
                 className="clear-button"
@@ -867,6 +921,286 @@ if __name__ == "__main__":
                 <li>Ensure the model is loaded and ready</li>
                 <li>Check browser console for error messages</li>
               </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dashboard Modal */}
+      {showDashboard && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.8)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}
+          onClick={() => setShowDashboard(false)}
+        >
+          <div 
+            style={{
+              background: '#2a2a2a',
+              border: '1px solid #333',
+              borderRadius: '8px',
+              padding: isMobile ? '15px' : '20px',
+              maxWidth: isMobile ? '95%' : '90%',
+              width: '90%',
+              maxHeight: isMobile ? '90vh' : '85vh',
+              overflow: 'auto'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              marginBottom: '20px'
+            }}>
+              <h2 style={{ margin: 0, color: '#e0e0e0' }}>📊 Performance Dashboard</h2>
+              <button 
+                onClick={() => setShowDashboard(false)}
+                style={{
+                  background: '#cc4444',
+                  color: '#e0e0e0',
+                  border: '1px solid #aa3333',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            {/* Dashboard Tabs */}
+            <div style={{ 
+              display: 'flex', 
+              gap: '10px', 
+              marginBottom: '20px',
+              flexWrap: 'wrap'
+            }}>
+              <button 
+                onClick={() => setActiveDashboardTab('model')}
+                style={{
+                  background: activeDashboardTab === 'model' ? '#0066cc' : '#444',
+                  color: '#e0e0e0',
+                  border: '1px solid #555',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: isMobile ? '0.8rem' : '1rem'
+                }}
+              >
+                🧠 Model Metrics
+              </button>
+              <button 
+                onClick={() => setActiveDashboardTab('system')}
+                style={{
+                  background: activeDashboardTab === 'system' ? '#0066cc' : '#444',
+                  color: '#e0e0e0',
+                  border: '1px solid #555',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: isMobile ? '0.8rem' : '1rem'
+                }}
+              >
+                ⚙️ System Metrics
+              </button>
+              <button 
+                onClick={() => setActiveDashboardTab('composite')}
+                style={{
+                  background: activeDashboardTab === 'composite' ? '#0066cc' : '#444',
+                  color: '#e0e0e0',
+                  border: '1px solid #555',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: isMobile ? '0.8rem' : '1rem'
+                }}
+              >
+                📊 Composite Insights
+              </button>
+            </div>
+
+            {/* Dashboard Content */}
+            <div style={{ 
+              background: '#1a1a1a', 
+              border: '1px solid #333', 
+              borderRadius: '6px', 
+              padding: '20px',
+              minHeight: '400px',
+              maxHeight: '60vh',
+              overflow: 'auto'
+            }}>
+              {activeDashboardTab === 'model' && (
+                <div>
+                  <h3 style={{ color: '#3b82f6', marginBottom: '15px' }}>🧠 Model-Level Metrics</h3>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Latency</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>Prompt-to-first-token: <span style={{ color: '#00ff00' }}>{modelMetrics?.promptToFirstToken.toFixed(1) || '--'} ms</span></div>
+                        <div>Total response time: <span style={{ color: '#00ff00' }}>{modelMetrics?.totalResponseTime.toFixed(1) || '--'} ms</span></div>
+                      </div>
+                    </div>
+                    
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Token Throughput</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>Tokens/sec: <span style={{ color: '#00ff00' }}>{modelMetrics?.tokensPerSecond.toFixed(1) || '--'} t/s</span></div>
+                        <div>Tokens in/out: <span style={{ color: '#00ff00' }}>{modelMetrics?.tokensIn || '--'} / {modelMetrics?.tokensOut || '--'}</span></div>
+                      </div>
+                    </div>
+                    
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Context Utilization</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>Prompt length: <span style={{ color: '#00ff00' }}>{modelMetrics?.promptLength || '--'} tokens</span></div>
+                        <div>Max tokens: <span style={{ color: '#00ff00' }}>{modelMetrics?.maxTokens || '--'} tokens</span></div>
+                        <div>Utilization: <span style={{ color: '#00ff00' }}>{modelMetrics?.contextUtilization.toFixed(1) || '--'}%</span></div>
+                      </div>
+                    </div>
+                    
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Performance</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>Active requests: <span style={{ color: '#00ff00' }}>{modelMetrics?.activeRequests || '--'}</span></div>
+                        <div>Quantization: <span style={{ color: '#00ff00' }}>{modelMetrics?.quantizationFormat || '--'}</span></div>
+                        <div>Cache hit rate: <span style={{ color: '#00ff00' }}>{modelMetrics?.cacheHitRate.toFixed(1) || '--'}%</span></div>
+                        <div>Errors: <span style={{ color: '#ff4444' }}>{modelMetrics?.errorCount || '--'}</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div style={{ background: '#1a2a1a', padding: '15px', borderRadius: '6px', border: '1px solid #00aa00' }}>
+                    <h4 style={{ color: '#00ff00', marginBottom: '10px' }}>💡 Real-time Status</h4>
+                    <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                      <div>Current model: <span style={{ color: '#00ff00' }}>{selectedModel}</span></div>
+                      <div>Endpoint: <span style={{ color: '#00ff00' }}>{customEndpoint}</span></div>
+                      <div>Temperature: <span style={{ color: '#00ff00' }}>{temperature}</span></div>
+                      <div>Max tokens: <span style={{ color: '#00ff00' }}>{maxTokens}</span></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeDashboardTab === 'system' && (
+                <div>
+                  <h3 style={{ color: '#3b82f6', marginBottom: '15px' }}>⚙️ System-Level Metrics</h3>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 CPU Utilization</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>Overall: <span style={{ color: '#00ff00' }}>{systemMetrics?.cpuUtilization.toFixed(1) || '--'}%</span></div>
+                        <div>Per-core avg: <span style={{ color: '#00ff00' }}>{systemMetrics?.cpuPerCore ? (systemMetrics.cpuPerCore.reduce((a, b) => a + b, 0) / systemMetrics.cpuPerCore.length).toFixed(1) : '--'}%</span></div>
+                        <div>Thread count: <span style={{ color: '#00ff00' }}>{systemMetrics?.threadCount || '--'}</span></div>
+                      </div>
+                    </div>
+                    
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 GPU Utilization</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>Compute: <span style={{ color: '#00ff00' }}>{systemMetrics?.gpuUtilization.toFixed(1) || '--'}%</span></div>
+                        <div>Memory: <span style={{ color: '#00ff00' }}>{systemMetrics?.gpuMemoryUsage.toFixed(0) || '--'} MB</span></div>
+                        <div>Temperature: <span style={{ color: '#00ff00' }}>{systemMetrics?.gpuTemperature.toFixed(1) || '--'}°C</span></div>
+                      </div>
+                    </div>
+                    
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Memory</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>RAM usage: <span style={{ color: '#00ff00' }}>{systemMetrics?.ramUsage.toFixed(0) || '--'} MB</span></div>
+                        <div>Swap activity: <span style={{ color: '#00ff00' }}>{systemMetrics?.swapActivity.toFixed(0) || '--'} MB</span></div>
+                        <div>Available: <span style={{ color: '#00ff00' }}>{systemMetrics?.availableMemory.toFixed(0) || '--'} MB</span></div>
+                      </div>
+                    </div>
+                    
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Power & Thermal</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>Power draw: <span style={{ color: '#00ff00' }}>{systemMetrics?.powerDraw.toFixed(1) || '--'} W</span></div>
+                        <div>CPU temp: <span style={{ color: '#00ff00' }}>{systemMetrics?.cpuTemperature.toFixed(1) || '--'}°C</span></div>
+                        <div>Throttling: <span style={{ color: systemMetrics?.isThrottling ? '#ff4444' : '#00ff00' }}>{systemMetrics?.isThrottling ? 'Yes' : 'No'}</span></div>
+                        <div>Battery: <span style={{ color: '#00ff00' }}>{systemMetrics?.batteryLevel.toFixed(1) || '--'}%</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div style={{ background: '#1a2a1a', padding: '15px', borderRadius: '6px', border: '1px solid #00aa00' }}>
+                    <h4 style={{ color: '#00ff00', marginBottom: '10px' }}>💡 System Status</h4>
+                    <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                      <div>Disk I/O: <span style={{ color: '#00ff00' }}>{systemMetrics?.diskIO.toFixed(1) || '--'} MB/s</span></div>
+                      <div>Network: <span style={{ color: '#00ff00' }}>{systemMetrics?.networkThroughput.toFixed(1) || '--'} MB/s</span></div>
+                      <div>Process PID: <span style={{ color: '#00ff00' }}>{systemMetrics?.processId || '--'}</span></div>
+                      <div>Uptime: <span style={{ color: '#00ff00' }}>{systemMetrics?.uptime ? Math.floor(systemMetrics.uptime / 3600) + 'h ' + Math.floor((systemMetrics.uptime % 3600) / 60) + 'm' : '--'}</span></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeDashboardTab === 'composite' && (
+                <div>
+                  <h3 style={{ color: '#3b82f6', marginBottom: '15px' }}>📊 Composite Insight Metrics</h3>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Energy Efficiency</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>Tokens/sec per Watt: <span style={{ color: '#00ff00' }}>{compositeMetrics?.tokensPerWatt.toFixed(2) || '--'} t/s/W</span></div>
+                        <div>Power efficiency: <span style={{ color: '#00ff00' }}>{compositeMetrics?.powerEfficiency.toFixed(1) || '--'}</span></div>
+                        <div>Battery drain rate: <span style={{ color: '#00ff00' }}>{compositeMetrics?.batteryDrainRate.toFixed(2) || '--'}%/min</span></div>
+                      </div>
+                    </div>
+                    
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Response Quality</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>Response time per token: <span style={{ color: '#00ff00' }}>{compositeMetrics?.responseTimePerToken.toFixed(1) || '--'} ms/token</span></div>
+                        <div>Decoding smoothness: <span style={{ color: '#00ff00' }}>{compositeMetrics?.decodingSmoothness.toFixed(1) || '--'}/10</span></div>
+                        <div>Quality score: <span style={{ color: '#00ff00' }}>{compositeMetrics?.qualityScore.toFixed(1) || '--'}/10</span></div>
+                      </div>
+                    </div>
+                    
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Resource Balance</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>CPU-GPU balance: <span style={{ color: '#00ff00' }}>{compositeMetrics?.cpuGpuBalance.toFixed(2) || '--'}</span></div>
+                        <div>Memory efficiency: <span style={{ color: '#00ff00' }}>{compositeMetrics?.memoryEfficiency.toFixed(1) || '--'}%</span></div>
+                        <div>Load distribution: <span style={{ color: '#00ff00' }}>{compositeMetrics?.loadDistribution || '--'}</span></div>
+                      </div>
+                    </div>
+                    
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid '#444' }}>
+                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Thermal Performance</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                        <div>Thermal efficiency: <span style={{ color: '#00ff00' }}>{compositeMetrics?.thermalEfficiency.toFixed(1) || '--'}/10</span></div>
+                        <div>Sustained duration: <span style={{ color: '#00ff00' }}>{compositeMetrics?.sustainedDuration.toFixed(1) || '--'} min</span></div>
+                        <div>Throttle threshold: <span style={{ color: '#ff4444' }}>{compositeMetrics?.throttleThreshold.toFixed(1) || '--'}°C</span></div>
+                        <div>Performance curve: <span style={{ color: '#00ff00' }}>{compositeMetrics?.performanceCurve || '--'}</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div style={{ background: '#1a2a1a', padding: '15px', borderRadius: '6px', border: '1px solid #00aa00' }}>
+                    <h4 style={{ color: '#00ff00', marginBottom: '10px' }}>💡 Performance Insights</h4>
+                    <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
+                      <div>Optimal settings detected: <span style={{ color: '#00ff00' }}>{compositeMetrics?.optimalSettings || '--'}</span></div>
+                      <div>Recommended adjustments: <span style={{ color: '#ffaa00' }}>{compositeMetrics?.recommendedAdjustments || '--'}</span></div>
+                      <div>Performance trend: <span style={{ color: '#00ff00' }}>{compositeMetrics?.performanceTrend || '--'}</span></div>
+                      <div>Efficiency rating: <span style={{ color: '#00ff00' }}>{compositeMetrics?.efficiencyRating.toFixed(1) || '--'}/10</span></div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
