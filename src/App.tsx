@@ -2,13 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 function App() {
-  const [messages, setMessages] = useState([
-    {
-      role: 'system',
-      content: 'Welcome to the AI Model Playground. I\'m ready to help you test and interact with different AI models. What would you like to explore today?',
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [selectedModel, setSelectedModel] = useState('LM Studio (Local)');
@@ -260,13 +254,7 @@ function App() {
   };
 
   const handleClearChat = () => {
-    setMessages([
-      {
-        role: 'system',
-        content: 'Welcome to the AI Model Playground. I\'m ready to help you test and interact with different AI models. What would you like to explore today?',
-        timestamp: new Date(),
-      },
-    ]);
+    setMessages([]);
   };
 
   const handleCopyCode = async () => {
