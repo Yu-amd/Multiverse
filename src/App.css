@@ -57,6 +57,15 @@ body {
   padding: 1rem;
 }
 
+/* ROG Ally X Layout */
+.content-wrapper.rog-ally-layout {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+  gap: 30px;
+  height: calc(100vh - 40px);
+  padding: 30px;
+}
+
 /* Mobile Layout */
 .content-wrapper.mobile-layout {
   grid-template-columns: 1fr;
@@ -80,6 +89,13 @@ body {
   order: 1;
 }
 
+/* ROG Ally X Chat Container */
+.rog-ally-layout .chat-container {
+  order: 1;
+  min-height: 0;
+  padding: 30px;
+}
+
 .mobile-layout .chat-container {
   order: 1;
   min-height: 0;
@@ -95,6 +111,13 @@ body {
   max-height: calc(100% - 120px);
 }
 
+/* ROG Ally X Chat Messages */
+.rog-ally-layout .chat-messages {
+  font-size: 1.25rem;
+  margin-bottom: 25px;
+  line-height: 1.6;
+}
+
 .mobile-layout .chat-messages {
   font-size: 0.875rem;
   margin-bottom: 15px;
@@ -107,6 +130,14 @@ body {
   border-radius: 8px;
   font-size: 1rem;
   line-height: 1.4;
+}
+
+/* ROG Ally X Message Styles */
+.rog-ally-layout .message {
+  margin-bottom: 20px;
+  padding: 15px;
+  font-size: 1.2rem;
+  line-height: 1.5;
 }
 
 .mobile-layout .message {
@@ -146,6 +177,23 @@ body {
   font-size: 0.9rem;
 }
 
+/* ROG Ally X Thinking Section */
+.rog-ally-layout .thinking-section {
+  margin-bottom: 20px;
+  padding: 15px;
+  font-size: 1.1rem;
+}
+
+.rog-ally-layout .thinking-header {
+  font-size: 1.1rem;
+  margin-bottom: 12px;
+}
+
+.rog-ally-layout .thinking-content {
+  font-size: 1.1rem;
+  line-height: 1.5;
+}
+
 .thinking-content {
   color: #ffcc88;
   font-style: italic;
@@ -168,6 +216,23 @@ body {
   font-weight: bold;
   margin-bottom: 8px;
   font-size: 0.9rem;
+}
+
+/* ROG Ally X Response Section */
+.rog-ally-layout .response-section {
+  margin-bottom: 20px;
+  padding: 15px;
+  font-size: 1.1rem;
+}
+
+.rog-ally-layout .response-header {
+  font-size: 1.1rem;
+  margin-bottom: 12px;
+}
+
+.rog-ally-layout .response-content {
+  font-size: 1.1rem;
+  line-height: 1.5;
 }
 
 .response-content {
@@ -206,6 +271,14 @@ body {
   font-size: 1rem;
 }
 
+/* ROG Ally X Chat Input */
+.rog-ally-layout .chat-input {
+  min-height: 60px;
+  padding: 15px;
+  font-size: 1.2rem;
+  line-height: 1.5;
+}
+
 .mobile-layout .chat-input {
   min-height: 36px;
   padding: 8px;
@@ -221,6 +294,13 @@ body {
   cursor: pointer;
   min-width: 44px;
   font-size: 1rem;
+}
+
+/* ROG Ally X Send Button */
+.rog-ally-layout .send-button {
+  padding: 15px 20px;
+  font-size: 1.2rem;
+  min-width: 60px;
 }
 
 .mobile-layout .send-button {
@@ -246,6 +326,13 @@ body {
   max-height: 100%;
   overflow: hidden;
   order: 2;
+}
+
+/* ROG Ally X Code Panel */
+.rog-ally-layout .code-panel {
+  order: 2;
+  min-height: 0;
+  padding: 30px;
 }
 
 .mobile-layout .code-panel {
@@ -276,6 +363,12 @@ body {
   font-size: 1.2rem;
 }
 
+/* ROG Ally X Code Title */
+.rog-ally-layout .code-title {
+  font-size: 1.5rem;
+  margin-bottom: 25px;
+}
+
 .mobile-layout .code-title {
   font-size: 1rem;
 }
@@ -303,6 +396,13 @@ body {
   max-height: calc(100% - 80px);
 }
 
+/* ROG Ally X Code Preview */
+.rog-ally-layout .code-preview {
+  padding: 20px;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
 .mobile-layout .code-preview {
   padding: 10px;
   font-size: 0.75rem;
@@ -316,6 +416,12 @@ body {
   line-height: 1.6;
   margin: 0;
   white-space: pre-wrap;
+}
+
+/* ROG Ally X Code Content */
+.rog-ally-layout .code-content {
+  font-size: 1.1rem;
+  line-height: 1.7;
 }
 
 .mobile-layout .code-content {
@@ -334,6 +440,12 @@ body {
   font-size: 1rem;
 }
 
+/* ROG Ally X Control Buttons */
+.rog-ally-layout .control-button {
+  padding: 12px 20px;
+  font-size: 1.1rem;
+}
+
 .mobile-layout .control-button {
   padding: 6px 12px;
   font-size: 0.8rem;
@@ -347,6 +459,12 @@ body {
   border-radius: 6px;
   cursor: pointer;
   font-size: 1rem;
+}
+
+/* ROG Ally X Clear Button */
+.rog-ally-layout .clear-button {
+  padding: 12px 20px;
+  font-size: 1.1rem;
 }
 
 .mobile-layout .clear-button {
@@ -364,6 +482,12 @@ body {
   font-size: 0.75rem;
 }
 
+/* ROG Ally X Info Button */
+.rog-ally-layout .info-button {
+  padding: 10px 16px;
+  font-size: 1rem;
+}
+
 .mobile-layout .info-button {
   padding: 4px 8px;
   font-size: 0.7rem;
@@ -377,6 +501,12 @@ body {
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.75rem;
+}
+
+/* ROG Ally X Copy Button */
+.rog-ally-layout .copy-button {
+  padding: 10px 16px;
+  font-size: 1rem;
 }
 
 .mobile-layout .copy-button {

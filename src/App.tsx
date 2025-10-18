@@ -24,6 +24,7 @@ function App() {
   const [showApiInfo, setShowApiInfo] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
+  const [isROGAllyX, setIsROGAllyX] = useState(false);
 
   // Responsive design detection
   useEffect(() => {
@@ -31,11 +32,17 @@ function App() {
       const width = window.innerWidth;
       const height = window.innerHeight;
       
+      // ROG Ally X: 1920x1080 or similar handheld gaming device
+      setIsROGAllyX((width >= 1920 && height >= 1080) || 
+                   (width >= 1080 && height >= 1920) ||
+                   (width >= 1280 && height >= 720) ||
+                   (width >= 720 && height >= 1280));
+      
       // Mobile: width < 768px OR height < 600px (for handheld devices like ROG Ally)
-      setIsMobile(width < 768 || height < 600);
+      setIsMobile((width < 768 || height < 600) && !isROGAllyX);
       
       // Tablet: 768px <= width < 1024px AND height >= 600px
-      setIsTablet(width >= 768 && width < 1024 && height >= 600);
+      setIsTablet(width >= 768 && width < 1024 && height >= 600 && !isROGAllyX);
     };
 
     checkScreenSize();
@@ -402,7 +409,7 @@ if __name__ == "__main__":
 
   return (
     <div className="app-container">
-      <div className={`content-wrapper ${isMobile ? 'mobile-layout' : isTablet ? 'tablet-layout' : 'desktop-layout'}`}>
+      <div className={`content-wrapper ${isROGAllyX ? 'rog-ally-layout' : isMobile ? 'mobile-layout' : isTablet ? 'tablet-layout' : 'desktop-layout'}`}>
         {/* Chat Container */}
         <div className="chat-container">
           <div style={{ marginBottom: '20px' }}>
