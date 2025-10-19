@@ -58,4 +58,4 @@ Built with:
 
 ## License
 
-Private project for personal use.
+Apache License 2.0
