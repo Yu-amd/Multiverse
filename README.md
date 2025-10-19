@@ -9,10 +9,6 @@ A simplified, responsive AI model playground for testing different AI models acr
 [![CI Status](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> **🎥 [See it in action](README_PROOF.md)** - Screenshots, video demo, and proof it actually works!
-
-📚 **Quick Links**: [Quick Start](QUICKSTART.md) | [Contributing](CONTRIBUTING.md) | [Proof of Working](README_PROOF.md)
-
 ## Features
 
 - **Multi-Device Support**: Responsive design for desktop, tablet, and mobile (including ROG Ally X)
@@ -128,10 +124,6 @@ Multiverse/
 ├── scripts/          # Helper scripts (mock server)
 ├── .github/          # CI/CD workflows
 ```
-
-## Contributing
-
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Documentation
 
