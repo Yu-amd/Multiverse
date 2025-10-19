@@ -2,7 +2,7 @@
 import requests
 import json
 
-def chat_with_model_stream(message, endpoint="http://192.168.1.131:1234", conversation_history=None):
+def chat_with_model_stream(message, endpoint="http://192.168.1.141:1234", conversation_history=None):
     """Send a message to an AI model endpoint with streaming response"""
     
     headers = {
@@ -12,10 +12,7 @@ def chat_with_model_stream(message, endpoint="http://192.168.1.131:1234", conver
     # Build conversation history
     if conversation_history is None:
         messages = [
-            {"role": "user", "content": "Hi!"},
-            {"role": "assistant", "content": "Hello! 🌟 How can I assist you today? 😊"},
-            {"role": "user", "content": "What is 1+1?"},
-            {"role": "assistant", "content": "1 + 1 = 2 ✅  \n\nSimple and sweet! 😊  \nIs there anything else you'd like to explore? 🚀"},
+            {"role": "system", "content": "You are a helpful AI assistant."},
             {"role": "user", "content": message}
         ]
     else:
@@ -76,10 +73,7 @@ def chat_with_model(message, endpoint="http://192.168.1.141:1234"):
     
     # Build conversation history
     messages = [
-            {"role": "user", "content": "Hi!"},
-            {"role": "assistant", "content": "Hello! 🌟 How can I assist you today? 😊"},
-            {"role": "user", "content": "What is 1+1?"},
-            {"role": "assistant", "content": "1 + 1 = 2 ✅  \n\nSimple and sweet! 😊  \nIs there anything else you'd like to explore? 🚀"},
+        {"role": "system", "content": "You are a helpful AI assistant."},
         {"role": "user", "content": message}
     ]
     

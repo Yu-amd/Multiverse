@@ -1,4 +1,5 @@
 /* Multiverse - AI Model Playground Styles */
+/* Inspired by GenAI_Playground design system */
 
 /* Global Styles */
 * {
@@ -8,10 +9,12 @@
 body {
   margin: 0;
   padding: 0;
-  font-family: 'JetBrains Mono', 'Source Code Pro', 'Courier New', monospace;
-  background: #0a0a0a;
-  color: #e0e0e0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  background: #0d1117;
+  color: #c9d1d9;
   overflow: hidden; /* Prevent body scroll */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
@@ -24,9 +27,9 @@ body {
 .app-container {
   height: 100vh;
   width: 100vw;
-  background: #1a1a1a;
-  color: #e0e0e0;
-  font-family: 'JetBrains Mono', monospace;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -77,8 +80,8 @@ body {
 
 /* Chat Container */
 .chat-container {
-  background: #2a2a2a;
-  border: 1px solid #333;
+  background: #161b22;
+  border: 1px solid #30363d;
   border-radius: 8px;
   padding: 20px;
   display: flex;
@@ -87,6 +90,7 @@ body {
   max-height: 100%;
   overflow: hidden;
   order: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
 }
 
 /* ROG Ally X Chat Container */
@@ -149,15 +153,18 @@ body {
 }
 
 .message.user {
-  background: #0066cc;
+  background: #1f6feb;
+  border: 1px solid #388bfd;
 }
 
 .message.assistant {
-  background: #333;
+  background: #21262d;
+  border: 1px solid #30363d;
 }
 
 .message.system {
-  background: #444;
+  background: #30363d;
+  border: 1px solid #484f58;
   font-style: italic;
 }
 
@@ -263,13 +270,20 @@ body {
   flex: 1;
   min-height: 44px;
   padding: 10px;
-  border: 1px solid #555;
+  border: 1px solid #30363d;
   border-radius: 6px;
-  background: #1a1a1a;
-  color: #e0e0e0;
+  background: #0d1117;
+  color: #c9d1d9;
   font-family: inherit;
   resize: none;
   font-size: 1rem;
+  transition: border-color 0.2s;
+}
+
+.chat-input:focus {
+  outline: none;
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1);
 }
 
 /* ROG Ally X Chat Input */
@@ -287,14 +301,22 @@ body {
 }
 
 .send-button {
-  background: #0066cc;
-  color: #e0e0e0;
-  border: 1px solid #004499;
+  background: transparent;
+  color: #d2a8ff;
+  border: 1px solid #d2a8ff;
   padding: 10px;
   border-radius: 6px;
   cursor: pointer;
   min-width: 44px;
   font-size: 1rem;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.send-button:hover:not(:disabled) {
+  background: rgba(210, 168, 255, 0.1);
+  border-color: #d2a8ff;
+  box-shadow: 0 0 0 3px rgba(210, 168, 255, 0.15);
 }
 
 /* ROG Ally X Send Button */
@@ -311,14 +333,17 @@ body {
 }
 
 .send-button:disabled {
-  background: #666;
+  background: transparent;
+  border-color: #30363d;
+  color: #6e7681;
   cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* Code Panel */
 .code-panel {
-  background: #2a2a2a;
-  border: 1px solid #333;
+  background: #161b22;
+  border: 1px solid #30363d;
   border-radius: 8px;
   padding: 20px;
   display: flex;
@@ -327,6 +352,7 @@ body {
   max-height: 100%;
   overflow: hidden;
   order: 2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
 }
 
 /* ROG Ally X Code Panel */
@@ -360,8 +386,9 @@ body {
 
 .code-title {
   margin: 0;
-  color: #e0e0e0;
+  color: #c9d1d9;
   font-size: 1.2rem;
+  font-weight: 600;
 }
 
 /* ROG Ally X Code Title */
@@ -386,15 +413,60 @@ body {
 }
 
 /* Code Preview Area */
+/* Language Tabs */
+.language-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 8px 15px;
+  background: #0d1117;
+  border-bottom: 1px solid #30363d;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.language-tab {
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.language-tab:hover {
+  background: #30363d;
+  border-color: #58a6ff;
+}
+
+.language-tab.active {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #ffffff;
+}
+
+.rog-ally-layout .language-tab {
+  padding: 8px 16px;
+  font-size: 0.9rem;
+}
+
+.mobile-layout .language-tab {
+  padding: 5px 10px;
+  font-size: 0.7rem;
+}
+
 .code-preview {
   flex: 1;
-  background: #0a0a0a;
-  border: 1px solid #333;
+  background: #0d1117;
+  border: 1px solid #30363d;
   border-radius: 6px;
   padding: 15px;
   overflow: auto;
   min-height: 0;
-  max-height: calc(100% - 80px);
+  max-height: calc(100% - 130px);
 }
 
 /* ROG Ally X Code Preview */
@@ -411,8 +483,8 @@ body {
 }
 
 .code-content {
-  color: #e0e0e0;
-  font-family: 'JetBrains Mono', monospace;
+  color: #c9d1d9;
+  font-family: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 0.875rem;
   line-height: 1.6;
   margin: 0;
@@ -430,15 +502,94 @@ body {
   line-height: 1.4;
 }
 
+/* Syntax Highlighting */
+.code-content-highlighted {
+  padding: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: #e0e0e0;
+}
+
+.code-line {
+  display: flex;
+  min-height: 1.6em;
+}
+
+.line-number {
+  color: #6e7681;
+  padding-right: 15px;
+  text-align: right;
+  user-select: none;
+  min-width: 40px;
+  flex-shrink: 0;
+}
+
+.line-content {
+  flex: 1;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* Syntax Highlighting Colors - GitHub inspired */
+.keyword {
+  color: #ff7b72;
+  font-weight: bold;
+}
+
+.string {
+  color: #a5d6ff;
+}
+
+.number {
+  color: #79c0ff;
+}
+
+.comment {
+  color: #8b949e;
+  font-style: italic;
+}
+
+.self {
+  color: #ffa657;
+}
+
+.flag {
+  color: #d2a8ff;
+}
+
+.reference {
+  color: #7ee787;
+}
+
+/* ROG Ally X Syntax Highlighting */
+.rog-ally-layout .code-content-highlighted {
+  font-size: 1.1rem;
+  line-height: 1.7;
+}
+
+.mobile-layout .code-content-highlighted {
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
 /* Control Buttons */
 .control-button {
-  background: #0066cc;
-  color: #e0e0e0;
-  border: 1px solid #004499;
+  background: transparent;
+  color: #d2a8ff;
+  border: 1px solid #d2a8ff;
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 1rem;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.control-button:hover {
+  background: rgba(210, 168, 255, 0.1);
+  border-color: #d2a8ff;
+  box-shadow: 0 0 0 3px rgba(210, 168, 255, 0.15);
 }
 
 /* ROG Ally X Control Buttons */
@@ -453,13 +604,21 @@ body {
 }
 
 .clear-button {
-  background: #cc4444;
-  color: #e0e0e0;
-  border: 1px solid #aa3333;
+  background: transparent;
+  color: #f85149;
+  border: 1px solid #f85149;
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 1rem;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.clear-button:hover {
+  background: rgba(248, 81, 73, 0.1);
+  border-color: #f85149;
+  box-shadow: 0 0 0 3px rgba(248, 81, 73, 0.15);
 }
 
 /* ROG Ally X Clear Button */
@@ -474,13 +633,21 @@ body {
 }
 
 .info-button {
-  background: #2563eb;
-  color: white;
-  border: none;
+  background: transparent;
+  color: #58a6ff;
+  border: 1px solid #58a6ff;
   padding: 6px 12px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.75rem;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.info-button:hover {
+  background: rgba(88, 166, 255, 0.1);
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
 }
 
 /* ROG Ally X Info Button */
@@ -495,13 +662,21 @@ body {
 }
 
 .copy-button {
-  background: #0066cc;
-  color: #e0e0e0;
-  border: 1px solid #004499;
+  background: transparent;
+  color: #d2a8ff;
+  border: 1px solid #d2a8ff;
   padding: 6px 12px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.75rem;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.copy-button:hover {
+  background: rgba(210, 168, 255, 0.1);
+  border-color: #d2a8ff;
+  box-shadow: 0 0 0 3px rgba(210, 168, 255, 0.15);
 }
 
 /* ROG Ally X Copy Button */
@@ -518,19 +693,20 @@ body {
 /* Scrollbar Styling */
 ::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #1a1a1a;
+  background: #0d1117;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #444;
+  background: #30363d;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: #484f58;
 }
 
 /* Modal Styles */
@@ -680,14 +856,15 @@ body {
 }
 
 .dashboard-content {
-  background: #2a2a2a;
-  border: 1px solid #333;
+  background: #161b22;
+  border: 1px solid #30363d;
   border-radius: 8px;
   padding: 20px;
   max-width: 90%;
   width: 90%;
   max-height: 85vh;
   overflow: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 .mobile-layout .dashboard-content {
@@ -705,8 +882,9 @@ body {
 
 .dashboard-title {
   margin: 0;
-  color: #e0e0e0;
+  color: #c9d1d9;
   font-size: 1.5rem;
+  font-weight: 600;
 }
 
 .mobile-layout .dashboard-title {
@@ -721,22 +899,26 @@ body {
 }
 
 .dashboard-tab {
-  background: #444;
-  color: #e0e0e0;
-  border: 1px solid #555;
+  background: transparent;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 1rem;
-  transition: background-color 0.2s;
+  transition: all 0.2s;
+  font-weight: 500;
 }
 
 .dashboard-tab:hover {
-  background: #555;
+  background: rgba(88, 166, 255, 0.1);
+  border-color: #58a6ff;
 }
 
 .dashboard-tab.active {
-  background: #0066cc;
+  background: transparent;
+  border-color: #d2a8ff;
+  color: #d2a8ff;
 }
 
 .mobile-layout .dashboard-tab {
@@ -745,8 +927,8 @@ body {
 }
 
 .dashboard-panel {
-  background: #1a1a1a;
-  border: 1px solid #333;
+  background: #0d1117;
+  border: 1px solid #30363d;
   border-radius: 6px;
   padding: 20px;
   min-height: 400px;
@@ -772,10 +954,10 @@ body {
 }
 
 .metric-card {
-  background: #2a2a2a;
+  background: #161b22;
   padding: 15px;
   border-radius: 6px;
-  border: 1px solid #444;
+  border: 1px solid #30363d;
 }
 
 .mobile-layout .metric-card {
@@ -783,7 +965,7 @@ body {
 }
 
 .metric-title {
-  color: #ff8c00;
+  color: #ffa657;
   margin-bottom: 10px;
   font-size: 1rem;
   font-weight: 600;
@@ -795,7 +977,7 @@ body {
 
 .metric-value {
   font-size: 0.9rem;
-  color: #ccc;
+  color: #c9d1d9;
   line-height: 1.4;
 }
 
@@ -804,25 +986,25 @@ body {
 }
 
 .metric-value .value {
-  color: #00ff00;
+  color: #7ee787;
   font-weight: 600;
 }
 
 .metric-value .error {
-  color: #ff4444;
+  color: #f85149;
   font-weight: 600;
 }
 
 .metric-value .warning {
-  color: #ffaa00;
+  color: #ffa657;
   font-weight: 600;
 }
 
 .status-card {
-  background: #1a2a1a;
+  background: #161b22;
   padding: 15px;
   border-radius: 6px;
-  border: 1px solid #00aa00;
+  border: 1px solid #238636;
 }
 
 .mobile-layout .status-card {
@@ -830,7 +1012,7 @@ body {
 }
 
 .status-title {
-  color: #00ff00;
+  color: #7ee787;
   margin-bottom: 10px;
   font-size: 1rem;
   font-weight: 600;
@@ -842,7 +1024,7 @@ body {
 
 .status-content {
   font-size: 0.9rem;
-  color: #ccc;
+  color: #c9d1d9;
   line-height: 1.4;
 }
 
@@ -851,7 +1033,7 @@ body {
 }
 
 .section-title {
-  color: #3b82f6;
+  color: #58a6ff;
   margin-bottom: 15px;
   font-size: 1.2rem;
   font-weight: 600;
@@ -863,18 +1045,21 @@ body {
 
 /* Dashboard Close Button */
 .dashboard-close {
-  background: #cc4444;
-  color: #e0e0e0;
-  border: 1px solid #aa3333;
+  background: transparent;
+  color: #f85149;
+  border: 1px solid #f85149;
   padding: 8px 12px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
-  transition: background-color 0.2s;
+  transition: all 0.2s;
+  font-weight: 500;
 }
 
 .dashboard-close:hover {
-  background: #dd5555;
+  background: rgba(248, 81, 73, 0.1);
+  border-color: #f85149;
+  box-shadow: 0 0 0 3px rgba(248, 81, 73, 0.15);
 }
 
 .mobile-layout .dashboard-close {

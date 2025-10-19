@@ -19,6 +19,7 @@ function App() {
   const [showApiInfo, setShowApiInfo] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [activeDashboardTab, setActiveDashboardTab] = useState('model');
+  const [selectedLanguage, setSelectedLanguage] = useState('python');
   // Metrics data - will be updated with real values
   const [modelMetrics, setModelMetrics] = useState({
     promptToFirstToken: 0,
@@ -473,7 +474,7 @@ function App() {
 
   const handleCopyCode = async () => {
     try {
-      await navigator.clipboard.writeText(getPythonCode());
+      await navigator.clipboard.writeText(getCurrentCode());
       alert('Code copied to clipboard!');
     } catch (err) {
       console.error('Failed to copy code:', err);
@@ -649,6 +650,706 @@ if __name__ == "__main__":
     # print(f"AI Response: {response}")`;
   };
 
+  const getJavaScriptCode = () => {
+    const endpoint = selectedModel === 'Custom Endpoint' ? customEndpoint : 
+                    selectedModel === 'Ollama (Local)' ? 'http://localhost:11434' : 
+                    'http://localhost:1234';
+    
+    const cleanMessages = messages.filter(msg => msg.content.trim() !== '');
+    const conversationHistory = cleanMessages.map(msg => 
+      `        { role: "${msg.role}", content: ${JSON.stringify(msg.content)} }`
+    ).join(',\n');
+    
+    const currentMessage = inputMessage.trim() || "Hello, how can you help me?";
+    
+    return `// AI Model API Integration with Streaming (Node.js)
+const fetch = require('node-fetch');
+
+async function chatWithModelStream(message, endpoint = "${endpoint}", conversationHistory = null) {
+    const headers = {
+        "Content-Type": "application/json"${apiKey ? `,\n        "Authorization": "Bearer ${apiKey}"` : ''}
+    };
+    
+    let messages;
+    if (conversationHistory === null) {
+        messages = [
+${conversationHistory || '            { role: "system", content: "You are a helpful AI assistant." },'}
+            { role: "user", content: message }
+        ];
+    } else {
+        messages = [
+            { role: "system", content: "You are a helpful AI assistant." },
+            ...conversationHistory,
+            { role: "user", content: message }
+        ];
+    }
+    
+    const payload = {
+        messages: messages,
+        temperature: ${temperature},
+        max_tokens: ${maxTokens},
+        top_p: ${topP},
+        stream: true
+    };
+    
+    try {
+        const response = await fetch(\`\${endpoint}/v1/chat/completions\`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            throw new Error(\`HTTP error! status: \${response.status}\`);
+        }
+        
+        console.log("AI Response: ");
+        
+        let aiResponse = "";
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\\n').filter(line => line.trim() !== '');
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data.trim() === '[DONE]') continue;
+                    
+                    try {
+                        const parsed = JSON.parse(data);
+                        if (parsed.choices?.[0]?.delta?.content) {
+                            const content = parsed.choices[0].delta.content;
+                            process.stdout.write(content);
+                            aiResponse += content;
+                        }
+                    } catch (e) {
+                        // Skip invalid JSON
+                    }
+                }
+            }
+        }
+        
+        console.log();
+        return aiResponse;
+        
+    } catch (error) {
+        console.error(\`Error: \${error.message}\`);
+        return null;
+    }
+}
+
+// Interactive chat loop
+const readline = require('readline');
+
+async function interactiveChat(endpoint = "${endpoint}") {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    
+    console.log("🤖 AI Chat Assistant");
+    console.log("Type 'quit' or 'exit' to end the chat");
+    console.log("-".repeat(40));
+    
+    const conversationHistory = [];
+    
+    const askQuestion = () => {
+        rl.question("\\nYou: ", async (userInput) => {
+            const input = userInput.trim();
+            
+            if (input.toLowerCase() === 'quit' || input.toLowerCase() === 'exit') {
+                console.log("👋 Goodbye! Thanks for chatting!");
+                rl.close();
+                return;
+            }
+            
+            if (!input) {
+                console.log("Please enter a message or type 'quit' to exit.");
+                askQuestion();
+                return;
+            }
+            
+            // Add user message to history
+            conversationHistory.push({ role: "user", content: input });
+            
+            // Get AI response with streaming
+            process.stdout.write("\\nAI: ");
+            const aiResponse = await chatWithModelStream(input, endpoint, conversationHistory);
+            
+            // Add AI response to history
+            if (aiResponse) {
+                conversationHistory.push({ role: "assistant", content: aiResponse });
+            }
+            
+            // Continue the loop
+            askQuestion();
+        });
+    };
+    
+    askQuestion();
+}
+
+// Example usage
+if (require.main === module) {
+    // Start interactive chat loop
+    interactiveChat();
+    
+    // Or single message example:
+    // const message = ${JSON.stringify(currentMessage)};
+    // chatWithModelStream(message).then(response => {
+    //     console.log("\\nComplete response received");
+    // });
+}`;
+  };
+
+  const getCurlCode = () => {
+    const endpoint = selectedModel === 'Custom Endpoint' ? customEndpoint : 
+                    selectedModel === 'Ollama (Local)' ? 'http://localhost:11434' : 
+                    'http://localhost:1234';
+    
+    const cleanMessages = messages.filter(msg => msg.content.trim() !== '');
+    const conversationHistory = cleanMessages.map(msg => 
+      `      {"role": "${msg.role}", "content": ${JSON.stringify(msg.content)}}`
+    ).join(',\\n');
+    
+    const currentMessage = inputMessage.trim() || "Hello, how can you help me?";
+    
+    return `# AI Model API Integration with cURL - Chat Loop Example
+
+#!/bin/bash
+
+# Chat loop script - continues until user types 'quit' or 'exit'
+ENDPOINT="${endpoint}"
+CONVERSATION_HISTORY='[${conversationHistory || '{"role": "system", "content": "You are a helpful AI assistant."}'}]'
+
+echo "🤖 AI Chat Assistant"
+echo "Type 'quit' or 'exit' to end the chat"
+echo "----------------------------------------"
+
+while true; do
+    # Get user input
+    echo ""
+    read -p "You: " USER_INPUT
+    
+    # Check for quit command
+    if [[ "\${USER_INPUT,,}" == "quit" ]] || [[ "\${USER_INPUT,,}" == "exit" ]]; then
+        echo "👋 Goodbye! Thanks for chatting!"
+        break
+    fi
+    
+    # Skip empty input
+    if [ -z "$USER_INPUT" ]; then
+        continue
+    fi
+    
+    # Add user message to conversation
+    CONVERSATION_HISTORY=\$(echo "$CONVERSATION_HISTORY" | jq --arg msg "$USER_INPUT" '. += [{"role": "user", "content": $msg}]')
+    
+    # Make streaming API request
+    echo -n "AI: "
+    RESPONSE=\$(curl -s -X POST "\${ENDPOINT}/v1/chat/completions" \\
+      -H "Content-Type: application/json"${apiKey ? ` \\\n      -H "Authorization: Bearer ${apiKey}"` : ''} \\
+      -d "{
+        \\"messages\\": \$CONVERSATION_HISTORY,
+        \\"temperature\\": ${temperature},
+        \\"max_tokens\\": ${maxTokens},
+        \\"top_p\\": ${topP},
+        \\"stream\\": true
+      }" \\
+      --no-buffer | while IFS= read -r line; do
+        if [[ "$line" == data:* ]]; then
+            data="\${line:6}"
+            if [[ "$data" != "[DONE]" ]]; then
+                content=\$(echo "$data" | jq -r '.choices[0].delta.content // empty' 2>/dev/null)
+                if [ -n "$content" ] && [ "$content" != "null" ]; then
+                    echo -n "$content"
+                    echo -n "$content" >> /tmp/ai_response.txt
+                fi
+            fi
+        fi
+    done)
+    echo ""
+    
+    # Add AI response to conversation history
+    AI_RESPONSE=\$(cat /tmp/ai_response.txt 2>/dev/null || echo "")
+    if [ -n "$AI_RESPONSE" ]; then
+        CONVERSATION_HISTORY=\$(echo "$CONVERSATION_HISTORY" | jq --arg msg "$AI_RESPONSE" '. += [{"role": "assistant", "content": $msg}]')
+        rm -f /tmp/ai_response.txt
+    fi
+done
+
+# Single request example (non-loop):
+# curl -X POST "${endpoint}/v1/chat/completions" \\
+#   -H "Content-Type: application/json"${apiKey ? ` \\\n#   -H "Authorization: Bearer ${apiKey}"` : ''} \\
+#   -d '{
+#     "messages": [
+#${conversationHistory || '       {"role": "system", "content": "You are a helpful AI assistant."},'}
+#       {"role": "user", "content": ${JSON.stringify(currentMessage)}}
+#     ],
+#     "temperature": ${temperature},
+#     "max_tokens": ${maxTokens},
+#     "top_p": ${topP},
+#     "stream": true
+#   }' \\
+#   --no-buffer`;
+  };
+
+  const getRustCode = () => {
+    const endpoint = selectedModel === 'Custom Endpoint' ? customEndpoint : 
+                    selectedModel === 'Ollama (Local)' ? 'http://localhost:11434' : 
+                    'http://localhost:1234';
+    
+    const cleanMessages = messages.filter(msg => msg.content.trim() !== '');
+    const conversationHistory = cleanMessages.map(msg => 
+      `        Message { role: "${msg.role}".to_string(), content: ${JSON.stringify(msg.content)}.to_string() }`
+    ).join(',\n');
+    
+    const currentMessage = inputMessage.trim() || "Hello, how can you help me?";
+    
+    return `// AI Model API Integration with Streaming (Rust)
+use reqwest;
+use serde::{Deserialize, Serialize};
+use tokio_stream::StreamExt;
+
+#[derive(Serialize, Deserialize)]
+struct Message {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct ChatRequest {
+    messages: Vec<Message>,
+    temperature: f64,
+    max_tokens: i32,
+    top_p: f64,
+    stream: bool,
+}
+
+#[derive(Deserialize)]
+struct ChatResponse {
+    choices: Vec<Choice>,
+}
+
+#[derive(Deserialize)]
+struct Choice {
+    delta: Delta,
+}
+
+#[derive(Deserialize)]
+struct Delta {
+    content: Option<String>,
+}
+
+async fn chat_with_model_stream(
+    message: &str,
+    endpoint: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("Content-Type", "application/json".parse()?);${apiKey ? `\n    headers.insert("Authorization", format!("Bearer ${apiKey}").parse()?);` : ''}
+    
+    let messages = vec![
+        Message {
+            role: "system".to_string(),
+            content: "You are a helpful AI assistant.".to_string(),
+        },
+${conversationHistory || '        Message { role: "user".to_string(), content: message.to_string() }'}
+    ];
+    
+    let request = ChatRequest {
+        messages,
+        temperature: ${temperature},
+        max_tokens: ${maxTokens},
+        top_p: ${topP},
+        stream: true,
+    };
+    
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&format!("{}/v1/chat/completions", endpoint))
+        .headers(headers)
+        .json(&request)
+        .send()
+        .await?;
+    
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()).into());
+    }
+    
+    print!("AI Response: ");
+    
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        let text = String::from_utf8_lossy(&chunk);
+        
+        for line in text.lines() {
+            if line.starts_with("data: ") {
+                let data = &line[6..];
+                if data == "[DONE]" {
+                    break;
+                }
+                
+                if let Ok(response) = serde_json::from_str::<ChatResponse>(data) {
+                    if let Some(choice) = response.choices.first() {
+                        if let Some(content) = &choice.delta.content {
+                            print!("{}", content);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    println!();
+    Ok(())
+}
+
+// Interactive chat loop
+async fn interactive_chat(endpoint: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::{self, Write};
+    
+    println!("🤖 AI Chat Assistant");
+    println!("Type 'quit' or 'exit' to end the chat");
+    println!("{}", "-".repeat(40));
+    
+    let mut conversation_history: Vec<Message> = vec![
+        Message {
+            role: "system".to_string(),
+            content: "You are a helpful AI assistant.".to_string(),
+        }
+    ];
+    
+    loop {
+        // Get user input
+        print!("\\nYou: ");
+        io::stdout().flush()?;
+        
+        let mut user_input = String::new();
+        io::stdin().read_line(&mut user_input)?;
+        let user_input = user_input.trim();
+        
+        // Check for quit command
+        if user_input.to_lowercase() == "quit" || user_input.to_lowercase() == "exit" {
+            println!("👋 Goodbye! Thanks for chatting!");
+            break;
+        }
+        
+        // Skip empty input
+        if user_input.is_empty() {
+            continue;
+        }
+        
+        // Add user message to history
+        conversation_history.push(Message {
+            role: "user".to_string(),
+            content: user_input.to_string(),
+        });
+        
+        // Get AI response with streaming
+        print!("\\nAI: ");
+        io::stdout().flush()?;
+        
+        let ai_response = chat_with_model_stream_history(
+            &conversation_history,
+            endpoint
+        ).await?;
+        
+        // Add AI response to history
+        conversation_history.push(Message {
+            role: "assistant".to_string(),
+            content: ai_response,
+        });
+    }
+    
+    Ok(())
+}
+
+async fn chat_with_model_stream_history(
+    conversation_history: &Vec<Message>,
+    endpoint: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("Content-Type", "application/json".parse()?);${apiKey ? `\n    headers.insert("Authorization", format!("Bearer ${apiKey}").parse()?);` : ''}
+    
+    let request = ChatRequest {
+        messages: conversation_history.clone(),
+        temperature: ${temperature},
+        max_tokens: ${maxTokens},
+        top_p: ${topP},
+        stream: true,
+    };
+    
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&format!("{}/v1/chat/completions", endpoint))
+        .headers(headers)
+        .json(&request)
+        .send()
+        .await?;
+    
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()).into());
+    }
+    
+    let mut full_response = String::new();
+    let mut stream = response.bytes_stream();
+    
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        let text = String::from_utf8_lossy(&chunk);
+        
+        for line in text.lines() {
+            if line.starts_with("data: ") {
+                let data = &line[6..];
+                if data == "[DONE]" {
+                    break;
+                }
+                
+                if let Ok(response) = serde_json::from_str::<ChatResponse>(data) {
+                    if let Some(choice) = response.choices.first() {
+                        if let Some(content) = &choice.delta.content {
+                            print!("{}", content);
+                            full_response.push_str(content);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    println!();
+    Ok(full_response)
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let endpoint = "${endpoint}";
+    
+    // Start interactive chat loop
+    interactive_chat(endpoint).await?;
+    
+    // Or single message example:
+    // let message = ${JSON.stringify(currentMessage)};
+    // chat_with_model_stream(&message, endpoint).await?;
+    
+    Ok(())
+}`;
+  };
+
+  const getCurrentCode = () => {
+    switch (selectedLanguage) {
+      case 'python':
+        return getPythonCode();
+      case 'javascript':
+        return getJavaScriptCode();
+      case 'curl':
+        return getCurlCode();
+      case 'rust':
+        return getRustCode();
+      default:
+        return getPythonCode();
+    }
+  };
+
+  const highlightCode = (code: string, language: string) => {
+    const lines = code.split('\n');
+    return lines.map((line, index) => {
+      const lineNumber = index + 1;
+      
+      // Escape HTML first
+      let escapedLine = line
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      
+      let highlightedLine = '';
+      const tokens: Array<{type: string, value: string}> = [];
+
+      if (language === 'python') {
+        // Tokenize: find strings and comments first, then process the rest
+        let remaining = escapedLine;
+        let match;
+        
+        // Find comments
+        const commentMatch = remaining.match(/#.*$/);
+        if (commentMatch) {
+          const beforeComment = remaining.substring(0, commentMatch.index);
+          tokens.push({type: 'code', value: beforeComment});
+          tokens.push({type: 'comment', value: commentMatch[0]});
+        } else {
+          tokens.push({type: 'code', value: remaining});
+        }
+        
+        // Process each token
+        highlightedLine = tokens.map(token => {
+          if (token.type === 'comment') {
+            return `<span class="comment">${token.value}</span>`;
+          } else {
+            // Protect strings first
+            let processed = token.value;
+            const stringPlaceholders: string[] = [];
+            
+            // Extract strings
+            processed = processed.replace(/(["'])(?:\\.|(?!\1)[^\\])*\1/g, (match) => {
+              stringPlaceholders.push(match);
+              return `__STRING_${stringPlaceholders.length - 1}__`;
+            });
+            
+            // Now highlight keywords and numbers in non-string parts
+            processed = processed
+              .replace(/\b(def|class|import|from|if|else|elif|for|while|try|except|finally|with|as|return|yield|lambda|and|or|not|in|is|True|False|None|async|await|pass|break|continue|raise|assert)\b/g, '<span class="keyword">$1</span>')
+              .replace(/\b(self|cls)\b/g, '<span class="self">$1</span>')
+              .replace(/\b(\d+\.?\d*)\b/g, '<span class="number">$1</span>');
+            
+            // Restore strings
+            processed = processed.replace(/__STRING_(\d+)__/g, (_, idx) => {
+              return `<span class="string">${stringPlaceholders[parseInt(idx)]}</span>`;
+            });
+            
+            return processed;
+          }
+        }).join('');
+        
+      } else if (language === 'javascript') {
+        let remaining = escapedLine;
+        const commentMatch = remaining.match(/\/\/.*$/);
+        if (commentMatch) {
+          const beforeComment = remaining.substring(0, commentMatch.index);
+          tokens.push({type: 'code', value: beforeComment});
+          tokens.push({type: 'comment', value: commentMatch[0]});
+        } else {
+          tokens.push({type: 'code', value: remaining});
+        }
+        
+        highlightedLine = tokens.map(token => {
+          if (token.type === 'comment') {
+            return `<span class="comment">${token.value}</span>`;
+          } else {
+            let processed = token.value;
+            const stringPlaceholders: string[] = [];
+            
+            processed = processed.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, (match) => {
+              stringPlaceholders.push(match);
+              return `__STRING_${stringPlaceholders.length - 1}__`;
+            });
+            
+            processed = processed
+              .replace(/\b(function|const|let|var|if|else|for|while|try|catch|finally|return|async|await|class|extends|import|export|from|default|require|module|new|this|typeof|instanceof)\b/g, '<span class="keyword">$1</span>')
+              .replace(/\b(true|false|null|undefined)\b/g, '<span class="keyword">$1</span>')
+              .replace(/\b(\d+\.?\d*)\b/g, '<span class="number">$1</span>');
+            
+            processed = processed.replace(/__STRING_(\d+)__/g, (_, idx) => {
+              return `<span class="string">${stringPlaceholders[parseInt(idx)]}</span>`;
+            });
+            
+            return processed;
+          }
+        }).join('');
+        
+      } else if (language === 'bash') {
+        let remaining = escapedLine;
+        const commentMatch = remaining.match(/#.*$/);
+        if (commentMatch) {
+          const beforeComment = remaining.substring(0, commentMatch.index);
+          tokens.push({type: 'code', value: beforeComment});
+          tokens.push({type: 'comment', value: commentMatch[0]});
+        } else {
+          tokens.push({type: 'code', value: remaining});
+        }
+        
+        highlightedLine = tokens.map(token => {
+          if (token.type === 'comment') {
+            return `<span class="comment">${token.value}</span>`;
+          } else {
+            let processed = token.value;
+            const stringPlaceholders: string[] = [];
+            
+            processed = processed.replace(/(["'])(?:\\.|(?!\1)[^\\])*\1/g, (match) => {
+              stringPlaceholders.push(match);
+              return `__STRING_${stringPlaceholders.length - 1}__`;
+            });
+            
+            processed = processed
+              .replace(/\b(curl|echo|if|then|else|fi|for|while|do|done|function|return|export|cd|ls|mkdir|rm|cp|mv|grep|awk|sed)\b/g, '<span class="keyword">$1</span>')
+              .replace(/(-[a-zA-Z]|--[a-zA-Z-]+)/g, '<span class="flag">$1</span>')
+              .replace(/\b(\d+\.?\d*)\b/g, '<span class="number">$1</span>');
+            
+            processed = processed.replace(/__STRING_(\d+)__/g, (_, idx) => {
+              return `<span class="string">${stringPlaceholders[parseInt(idx)]}</span>`;
+            });
+            
+            return processed;
+          }
+        }).join('');
+        
+      } else if (language === 'rust') {
+        let remaining = escapedLine;
+        const commentMatch = remaining.match(/\/\/.*$/);
+        if (commentMatch) {
+          const beforeComment = remaining.substring(0, commentMatch.index);
+          tokens.push({type: 'code', value: beforeComment});
+          tokens.push({type: 'comment', value: commentMatch[0]});
+        } else {
+          tokens.push({type: 'code', value: remaining});
+        }
+        
+        highlightedLine = tokens.map(token => {
+          if (token.type === 'comment') {
+            return `<span class="comment">${token.value}</span>`;
+          } else {
+            let processed = token.value;
+            const stringPlaceholders: string[] = [];
+            
+            processed = processed.replace(/(["'])(?:\\.|(?!\1)[^\\])*\1/g, (match) => {
+              stringPlaceholders.push(match);
+              return `__STRING_${stringPlaceholders.length - 1}__`;
+            });
+            
+            processed = processed
+              .replace(/\b(fn|let|mut|const|static|if|else|match|for|while|loop|break|continue|return|async|await|struct|enum|impl|trait|use|mod|pub|priv|super|self|Self|true|false|Some|None|Ok|Err|Result|Option|Vec|String|Box|dyn|std)\b/g, '<span class="keyword">$1</span>')
+              .replace(/&amp;([a-zA-Z_][a-zA-Z0-9_]*)/g, '&amp;<span class="reference">$1</span>')
+              .replace(/\b(\d+\.?\d*)\b/g, '<span class="number">$1</span>');
+            
+            processed = processed.replace(/__STRING_(\d+)__/g, (_, idx) => {
+              return `<span class="string">${stringPlaceholders[parseInt(idx)]}</span>`;
+            });
+            
+            return processed;
+          }
+        }).join('');
+      }
+
+      return (
+        <div key={index} className="code-line">
+          <span className="line-number">{lineNumber}</span>
+          <span className="line-content" dangerouslySetInnerHTML={{ __html: highlightedLine }} />
+        </div>
+      );
+    });
+  };
+
+  const getLanguageName = () => {
+    switch (selectedLanguage) {
+      case 'python':
+        return 'python';
+      case 'javascript':
+        return 'javascript';
+      case 'curl':
+        return 'bash';
+      case 'rust':
+        return 'rust';
+      default:
+        return 'python';
+    }
+  };
+
   return (
     <div className="app-container">
       <div className={`content-wrapper ${isROGAllyX ? 'rog-ally-layout' : isMobile ? 'mobile-layout' : isTablet ? 'tablet-layout' : 'desktop-layout'}`}>
@@ -672,23 +1373,6 @@ if __name__ == "__main__":
                 onClick={() => setShowDashboard(true)}
               >
                 📊 Dashboard
-              </button>
-              <button 
-                className="control-button"
-                onClick={async () => {
-                  console.log('Testing connection...');
-                  try {
-                    const endpoint = selectedModel === 'Custom Endpoint' ? customEndpoint : 
-                                    selectedModel === 'Ollama (Local)' ? 'http://localhost:11434' : 
-                                    'http://localhost:1234';
-                    const response = await fetch(`${endpoint}/v1/models`);
-                    console.log('Connection test result:', response.status, await response.text());
-                  } catch (error) {
-                    console.error('Connection test failed:', error);
-                  }
-                }}
-              >
-                🔍 Test
               </button>
               {/* <button 
                 className="control-button"
@@ -786,10 +1470,38 @@ if __name__ == "__main__":
             </div>
           </div>
 
+          {/* Language Tabs */}
+          <div className="language-tabs">
+            <button 
+              className={`language-tab ${selectedLanguage === 'python' ? 'active' : ''}`}
+              onClick={() => setSelectedLanguage('python')}
+            >
+              Python
+            </button>
+            <button 
+              className={`language-tab ${selectedLanguage === 'javascript' ? 'active' : ''}`}
+              onClick={() => setSelectedLanguage('javascript')}
+            >
+              JavaScript
+            </button>
+            <button 
+              className={`language-tab ${selectedLanguage === 'curl' ? 'active' : ''}`}
+              onClick={() => setSelectedLanguage('curl')}
+            >
+              cURL
+            </button>
+            <button 
+              className={`language-tab ${selectedLanguage === 'rust' ? 'active' : ''}`}
+              onClick={() => setSelectedLanguage('rust')}
+            >
+              Rust
+            </button>
+          </div>
+
           <div className="code-preview">
-            <pre className="code-content">
-              <code>{getPythonCode()}</code>
-            </pre>
+            <div className="code-content-highlighted">
+              {highlightCode(getCurrentCode(), getLanguageName())}
+            </div>
           </div>
         </div>
       </div>
@@ -813,14 +1525,15 @@ if __name__ == "__main__":
         >
           <div 
             style={{
-              background: '#2a2a2a',
-              border: '1px solid #333',
+              background: '#161b22',
+              border: '1px solid #30363d',
               borderRadius: '8px',
               padding: isMobile ? '15px' : '20px',
               maxWidth: isMobile ? '95%' : '500px',
               width: '90%',
               maxHeight: isMobile ? '90vh' : '80vh',
-              overflow: 'auto'
+              overflow: 'auto',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)'
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -830,24 +1543,28 @@ if __name__ == "__main__":
               alignItems: 'center',
               marginBottom: '20px'
             }}>
-              <h2 style={{ margin: 0, color: '#e0e0e0' }}>Model Settings</h2>
+              <h2 style={{ margin: 0, color: '#c9d1d9', fontWeight: 600 }}>Model Settings</h2>
               <button 
                 onClick={() => setShowSettings(false)}
                 style={{
-                  background: '#cc4444',
-                  color: '#e0e0e0',
-                  border: '1px solid #aa3333',
+                  background: 'transparent',
+                  color: '#f85149',
+                  border: '1px solid #f85149',
                   padding: '8px 12px',
                   borderRadius: '6px',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                  transition: 'all 0.2s'
                 }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(248, 81, 73, 0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
               >
                 ✕ Close
               </button>
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#e0e0e0' }}>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
                 Model Provider
               </label>
               <select
@@ -865,10 +1582,10 @@ if __name__ == "__main__":
                 style={{
                   width: '100%',
                   padding: '8px',
-                  border: '1px solid #555',
+                  border: '1px solid #30363d',
                   borderRadius: '6px',
-                  background: '#1a1a1a',
-                  color: '#e0e0e0',
+                  background: '#0d1117',
+                  color: '#c9d1d9',
                   fontFamily: 'inherit'
                 }}
               >
@@ -879,7 +1596,7 @@ if __name__ == "__main__":
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#e0e0e0' }}>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
                 Endpoint URL
               </label>
               <input
@@ -894,14 +1611,14 @@ if __name__ == "__main__":
                 style={{
                   width: '100%',
                   padding: '8px',
-                  border: '1px solid #555',
+                  border: '1px solid #30363d',
                   borderRadius: '6px',
-                  background: '#1a1a1a',
-                  color: '#e0e0e0',
+                  background: '#0d1117',
+                  color: '#c9d1d9',
                   fontFamily: 'inherit'
                 }}
               />
-              <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '4px' }}>
+              <div style={{ fontSize: '0.8rem', color: '#8b949e', marginTop: '4px' }}>
                 {selectedModel === 'LM Studio (Local)' && 'Default: http://localhost:1234'}
                 {selectedModel === 'Ollama (Local)' && 'Default: http://localhost:11434'}
                 {selectedModel === 'Custom Endpoint' && 'Enter your custom endpoint URL'}
@@ -909,7 +1626,7 @@ if __name__ == "__main__":
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#e0e0e0' }}>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
                 API Key (Optional)
               </label>
               <input
@@ -920,17 +1637,17 @@ if __name__ == "__main__":
                 style={{
                   width: '100%',
                   padding: '8px',
-                  border: '1px solid #555',
+                  border: '1px solid #30363d',
                   borderRadius: '6px',
-                  background: '#1a1a1a',
-                  color: '#e0e0e0',
+                  background: '#0d1117',
+                  color: '#c9d1d9',
                   fontFamily: 'inherit'
                 }}
               />
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#e0e0e0' }}>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
                 Temperature: {temperature}
               </label>
               <input
@@ -945,7 +1662,7 @@ if __name__ == "__main__":
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#e0e0e0' }}>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
                 Max Tokens: {maxTokens}
               </label>
               <input
@@ -960,7 +1677,7 @@ if __name__ == "__main__":
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#e0e0e0' }}>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
                 Top P: {topP}
               </label>
               <input
@@ -975,7 +1692,7 @@ if __name__ == "__main__":
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#e0e0e0' }}>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
                 Layout Settings
               </label>
               <div style={{ 
@@ -994,7 +1711,7 @@ if __name__ == "__main__":
                   }}
                   style={{ transform: 'scale(1.2)' }}
                 />
-                <label htmlFor="rog-ally-toggle" style={{ color: '#e0e0e0', cursor: 'pointer' }}>
+                <label htmlFor="rog-ally-toggle" style={{ color: '#c9d1d9', cursor: 'pointer' }}>
                   🎮 Force ROG Ally X Layout (Bigger Fonts)
                 </label>
               </div>
@@ -1029,14 +1746,15 @@ if __name__ == "__main__":
         >
           <div 
             style={{
-              background: '#2a2a2a',
-              border: '1px solid #333',
+              background: '#161b22',
+              border: '1px solid #30363d',
               borderRadius: '8px',
               padding: isMobile ? '15px' : '20px',
               maxWidth: isMobile ? '95%' : '600px',
               width: '90%',
               maxHeight: isMobile ? '90vh' : '80vh',
-              overflow: 'auto'
+              overflow: 'auto',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)'
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1046,25 +1764,29 @@ if __name__ == "__main__":
               alignItems: 'center',
               marginBottom: '20px'
             }}>
-              <h2 style={{ margin: 0, color: '#e0e0e0' }}>API Integration Guide</h2>
+              <h2 style={{ margin: 0, color: '#c9d1d9', fontWeight: 600 }}>API Integration Guide</h2>
               <button 
                 onClick={() => setShowApiInfo(false)}
                 style={{
-                  background: '#cc4444',
-                  color: '#e0e0e0',
-                  border: '1px solid #aa3333',
+                  background: 'transparent',
+                  color: '#f85149',
+                  border: '1px solid #f85149',
                   padding: '8px 12px',
                   borderRadius: '6px',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                  transition: 'all 0.2s'
                 }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(248, 81, 73, 0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
               >
                 ✕ Close
         </button>
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#3b82f6', marginBottom: '10px' }}>🚀 Supported Endpoints</h3>
-              <ul style={{ color: '#d1d5db', paddingLeft: '20px' }}>
+              <h3 style={{ color: '#58a6ff', fontWeight: 600, marginBottom: '10px' }}>🚀 Supported Endpoints</h3>
+              <ul style={{ color: '#c9d1d9', paddingLeft: '20px' }}>
                 <li><strong>LM Studio:</strong> http://localhost:1234 (default)</li>
                 <li><strong>Ollama:</strong> http://localhost:11434 (default)</li>
                 <li><strong>Custom:</strong> Any OpenAI-compatible endpoint</li>
@@ -1072,8 +1794,8 @@ if __name__ == "__main__":
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#3b82f6', marginBottom: '10px' }}>⚙️ Parameters</h3>
-              <ul style={{ color: '#d1d5db', paddingLeft: '20px' }}>
+              <h3 style={{ color: '#58a6ff', fontWeight: 600, marginBottom: '10px' }}>⚙️ Parameters</h3>
+              <ul style={{ color: '#c9d1d9', paddingLeft: '20px' }}>
                 <li><strong>Temperature:</strong> Controls randomness (0.0-2.0)</li>
                 <li><strong>Max Tokens:</strong> Maximum response length (100-4096)</li>
                 <li><strong>Top P:</strong> Nucleus sampling parameter (0.0-1.0)</li>
@@ -1082,8 +1804,8 @@ if __name__ == "__main__":
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#3b82f6', marginBottom: '10px' }}>🔧 Setup Instructions</h3>
-              <div style={{ color: '#d1d5db', fontSize: '0.9rem' }}>
+              <h3 style={{ color: '#58a6ff', fontWeight: 600, marginBottom: '10px' }}>🔧 Setup Instructions</h3>
+              <div style={{ color: '#c9d1d9', fontSize: '0.9rem' }}>
                 <p><strong>LM Studio:</strong></p>
                 <ol style={{ paddingLeft: '20px', marginBottom: '15px' }}>
                   <li>Download and install LM Studio</li>
@@ -1093,16 +1815,16 @@ if __name__ == "__main__":
                 
                 <p><strong>Ollama:</strong></p>
                 <ol style={{ paddingLeft: '20px', marginBottom: '15px' }}>
-                  <li>Install Ollama: <code style={{ background: '#1a1a1a', padding: '2px 4px', borderRadius: '3px' }}>curl -fsSL https://ollama.ai/install.sh | sh</code></li>
-                  <li>Pull a model: <code style={{ background: '#1a1a1a', padding: '2px 4px', borderRadius: '3px' }}>ollama pull llama2</code></li>
-                  <li>Start server: <code style={{ background: '#1a1a1a', padding: '2px 4px', borderRadius: '3px' }}>ollama serve</code></li>
+                  <li>Install Ollama: <code style={{ background: '#0d1117', padding: '2px 4px', borderRadius: '3px', color: '#7ee787' }}>curl -fsSL https://ollama.ai/install.sh | sh</code></li>
+                  <li>Pull a model: <code style={{ background: '#0d1117', padding: '2px 4px', borderRadius: '3px', color: '#7ee787' }}>ollama pull llama2</code></li>
+                  <li>Start server: <code style={{ background: '#0d1117', padding: '2px 4px', borderRadius: '3px', color: '#7ee787' }}>ollama serve</code></li>
                 </ol>
               </div>
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#3b82f6', marginBottom: '10px' }}>💡 Features</h3>
-              <ul style={{ color: '#d1d5db', paddingLeft: '20px' }}>
+              <h3 style={{ color: '#58a6ff', fontWeight: 600, marginBottom: '10px' }}>💡 Features</h3>
+              <ul style={{ color: '#c9d1d9', paddingLeft: '20px' }}>
                 <li>Real-time streaming responses</li>
                 <li>Thinking vs Response detection</li>
                 <li>Interactive code generation</li>
@@ -1112,8 +1834,8 @@ if __name__ == "__main__":
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#3b82f6', marginBottom: '10px' }}>🐛 Troubleshooting</h3>
-              <ul style={{ color: '#d1d5db', paddingLeft: '20px' }}>
+              <h3 style={{ color: '#58a6ff', fontWeight: 600, marginBottom: '10px' }}>🐛 Troubleshooting</h3>
+              <ul style={{ color: '#c9d1d9', paddingLeft: '20px' }}>
                 <li>Check if your model server is running</li>
                 <li>Verify the endpoint URL is correct</li>
                 <li>Ensure the model is loaded and ready</li>
@@ -1143,14 +1865,15 @@ if __name__ == "__main__":
         >
           <div 
             style={{
-              background: '#2a2a2a',
-              border: '1px solid #333',
+              background: '#161b22',
+              border: '1px solid #30363d',
               borderRadius: '8px',
               padding: isMobile ? '15px' : '20px',
               maxWidth: isMobile ? '95%' : '90%',
               width: '90%',
               maxHeight: isMobile ? '90vh' : '85vh',
-              overflow: 'auto'
+              overflow: 'auto',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)'
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1160,17 +1883,21 @@ if __name__ == "__main__":
               alignItems: 'center',
               marginBottom: '20px'
             }}>
-              <h2 style={{ margin: 0, color: '#e0e0e0' }}>📊 Performance Dashboard</h2>
+              <h2 style={{ margin: 0, color: '#c9d1d9', fontWeight: 600 }}>📊 Performance Dashboard</h2>
               <button 
                 onClick={() => setShowDashboard(false)}
                 style={{
-                  background: '#cc4444',
-                  color: '#e0e0e0',
-                  border: '1px solid #aa3333',
+                  background: 'transparent',
+                  color: '#f85149',
+                  border: '1px solid #f85149',
                   padding: '8px 12px',
                   borderRadius: '6px',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                  transition: 'all 0.2s'
                 }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(248, 81, 73, 0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
               >
                 ✕ Close
               </button>
@@ -1186,13 +1913,15 @@ if __name__ == "__main__":
               <button 
                 onClick={() => setActiveDashboardTab('model')}
                 style={{
-                  background: activeDashboardTab === 'model' ? '#0066cc' : '#444',
-                  color: '#e0e0e0',
-                  border: '1px solid #555',
+                  background: 'transparent',
+                  color: activeDashboardTab === 'model' ? '#d2a8ff' : '#c9d1d9',
+                  border: activeDashboardTab === 'model' ? '1px solid #d2a8ff' : '1px solid #30363d',
                   padding: '8px 16px',
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontSize: isMobile ? '0.8rem' : '1rem'
+                  fontSize: isMobile ? '0.8rem' : '1rem',
+                  fontWeight: 500,
+                  transition: 'all 0.2s'
                 }}
               >
                 🧠 Model Metrics
@@ -1200,13 +1929,15 @@ if __name__ == "__main__":
               <button 
                 onClick={() => setActiveDashboardTab('system')}
                 style={{
-                  background: activeDashboardTab === 'system' ? '#0066cc' : '#444',
-                  color: '#e0e0e0',
-                  border: '1px solid #555',
+                  background: 'transparent',
+                  color: activeDashboardTab === 'system' ? '#d2a8ff' : '#c9d1d9',
+                  border: activeDashboardTab === 'system' ? '1px solid #d2a8ff' : '1px solid #30363d',
                   padding: '8px 16px',
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontSize: isMobile ? '0.8rem' : '1rem'
+                  fontSize: isMobile ? '0.8rem' : '1rem',
+                  fontWeight: 500,
+                  transition: 'all 0.2s'
                 }}
               >
                 ⚙️ System Metrics
@@ -1214,13 +1945,15 @@ if __name__ == "__main__":
               <button 
                 onClick={() => setActiveDashboardTab('composite')}
                 style={{
-                  background: activeDashboardTab === 'composite' ? '#0066cc' : '#444',
-                  color: '#e0e0e0',
-                  border: '1px solid #555',
+                  background: 'transparent',
+                  color: activeDashboardTab === 'composite' ? '#d2a8ff' : '#c9d1d9',
+                  border: activeDashboardTab === 'composite' ? '1px solid #d2a8ff' : '1px solid #30363d',
                   padding: '8px 16px',
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontSize: isMobile ? '0.8rem' : '1rem'
+                  fontSize: isMobile ? '0.8rem' : '1rem',
+                  fontWeight: 500,
+                  transition: 'all 0.2s'
                 }}
               >
                 📊 Composite Insights
@@ -1229,8 +1962,8 @@ if __name__ == "__main__":
 
             {/* Dashboard Content */}
             <div style={{ 
-              background: '#1a1a1a', 
-              border: '1px solid #333', 
+              background: '#0d1117', 
+              border: '1px solid #30363d', 
               borderRadius: '6px', 
               padding: '20px',
               minHeight: '400px',
@@ -1239,52 +1972,50 @@ if __name__ == "__main__":
             }}>
               {activeDashboardTab === 'model' && (
                 <div>
-                  <h3 style={{ color: '#3b82f6', marginBottom: '15px' }}>🧠 Model-Level Metrics</h3>
-                  
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Latency</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Prompt-to-first-token: <span style={{ color: '#00ff00' }}>{modelMetrics.promptToFirstToken.toFixed(1)} ms</span></div>
-                        <div>Total response time: <span style={{ color: '#00ff00' }}>{modelMetrics.totalResponseTime.toFixed(1)} ms</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600 }}>🔹 Latency</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>Prompt-to-first-token: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.promptToFirstToken.toFixed(1)} ms</span></div>
+                        <div>Total response time: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.totalResponseTime.toFixed(1)} ms</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Token Throughput</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Tokens/sec: <span style={{ color: '#00ff00' }}>{modelMetrics.tokensPerSecond.toFixed(1)} t/s</span></div>
-                        <div>Tokens in/out: <span style={{ color: '#00ff00' }}>{modelMetrics.tokensIn} / {modelMetrics.tokensOut}</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600 }}>🔹 Token Throughput</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>Tokens/sec: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.tokensPerSecond.toFixed(1)} t/s</span></div>
+                        <div>Tokens in/out: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.tokensIn} / {modelMetrics.tokensOut}</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Context Utilization</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Prompt length: <span style={{ color: '#00ff00' }}>{modelMetrics.promptLength} tokens</span></div>
-                        <div>Max tokens: <span style={{ color: '#00ff00' }}>{modelMetrics.maxTokens} tokens</span></div>
-                        <div>Utilization: <span style={{ color: '#00ff00' }}>{modelMetrics.contextUtilization.toFixed(1)}%</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600 }}>🔹 Context Utilization</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>Prompt length: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.promptLength} tokens</span></div>
+                        <div>Max tokens: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.maxTokens} tokens</span></div>
+                        <div>Utilization: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.contextUtilization.toFixed(1)}%</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Performance</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Active requests: <span style={{ color: '#00ff00' }}>{modelMetrics.activeRequests}</span></div>
-                        <div>Quantization: <span style={{ color: '#00ff00' }}>{modelMetrics.quantizationFormat}</span></div>
-                        <div>Cache hit rate: <span style={{ color: '#00ff00' }}>{modelMetrics.cacheHitRate.toFixed(1)}%</span></div>
-                        <div>Errors: <span style={{ color: '#ff4444' }}>{modelMetrics.errorCount}</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600 }}>🔹 Performance</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>Active requests: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.activeRequests}</span></div>
+                        <div>Quantization: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.quantizationFormat}</span></div>
+                        <div>Cache hit rate: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.cacheHitRate.toFixed(1)}%</span></div>
+                        <div>Errors: <span style={{ color: '#f85149', fontWeight: 600 }}>{modelMetrics.errorCount}</span></div>
                       </div>
                     </div>
                   </div>
                   
-                  <div style={{ background: '#1a2a1a', padding: '15px', borderRadius: '6px', border: '1px solid #00aa00' }}>
-                    <h4 style={{ color: '#00ff00', marginBottom: '10px' }}>💡 Real-time Status</h4>
-                    <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                      <div>Current model: <span style={{ color: '#00ff00' }}>{selectedModel}</span></div>
-                      <div>Endpoint: <span style={{ color: '#00ff00' }}>{customEndpoint}</span></div>
-                      <div>Temperature: <span style={{ color: '#00ff00' }}>{temperature}</span></div>
-                      <div>Max tokens: <span style={{ color: '#00ff00' }}>{maxTokens}</span></div>
+                  <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #238636' }}>
+                    <h4 style={{ color: '#7ee787', marginBottom: '10px', fontWeight: 600 }}>💡 Real-time Status</h4>
+                    <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <div>Current model: <span style={{ color: '#7ee787', fontWeight: 600 }}>{selectedModel}</span></div>
+                      <div>Endpoint: <span style={{ color: '#7ee787', fontWeight: 600 }}>{customEndpoint}</span></div>
+                      <div>Temperature: <span style={{ color: '#7ee787', fontWeight: 600 }}>{temperature}</span></div>
+                      <div>Max tokens: <span style={{ color: '#7ee787', fontWeight: 600 }}>{maxTokens}</span></div>
                     </div>
                   </div>
                 </div>
@@ -1292,54 +2023,52 @@ if __name__ == "__main__":
 
               {activeDashboardTab === 'system' && (
                 <div>
-                  <h3 style={{ color: '#3b82f6', marginBottom: '15px' }}>⚙️ System-Level Metrics</h3>
-                  
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 CPU Utilization</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Overall: <span style={{ color: '#00ff00' }}>{systemMetrics.cpuUtilization.toFixed(1)}%</span></div>
-                        <div>Per-core avg: <span style={{ color: '#00ff00' }}>{(systemMetrics.cpuUtilization * 0.8).toFixed(1)}%</span></div>
-                        <div>Thread count: <span style={{ color: '#00ff00' }}>{Math.floor(systemMetrics.cpuUtilization / 10) + 8}</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 CPU Utilization</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>Overall: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.cpuUtilization.toFixed(1)}%</span></div>
+                        <div>Per-core avg: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.cpuUtilization * 0.8).toFixed(1)}%</span></div>
+                        <div>Thread count: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.floor(systemMetrics.cpuUtilization / 10) + 8}</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 GPU Utilization</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Compute: <span style={{ color: '#00ff00' }}>{systemMetrics.gpuUtilization.toFixed(1)}%</span></div>
-                        <div>Memory: <span style={{ color: '#00ff00' }}>{Math.floor(systemMetrics.gpuUtilization * 80)} MB</span></div>
-                        <div>Temperature: <span style={{ color: '#00ff00' }}>{systemMetrics.temperature.toFixed(1)}°C</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 GPU Utilization</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>Compute: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.gpuUtilization.toFixed(1)}%</span></div>
+                        <div>Memory: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.floor(systemMetrics.gpuUtilization * 80)} MB</span></div>
+                        <div>Temperature: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.temperature.toFixed(1)}°C</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Memory</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>RAM usage: <span style={{ color: '#00ff00' }}>{systemMetrics.ramUsage.toFixed(0)} MB</span></div>
-                        <div>Swap activity: <span style={{ color: '#00ff00' }}>{Math.floor(systemMetrics.ramUsage * 0.1)} MB</span></div>
-                        <div>Available: <span style={{ color: '#00ff00' }}>{Math.floor(32000 - systemMetrics.ramUsage)} MB</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Memory</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>RAM usage: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.ramUsage.toFixed(0)} MB</span></div>
+                        <div>Swap activity: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.floor(systemMetrics.ramUsage * 0.1)} MB</span></div>
+                        <div>Available: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.floor(32000 - systemMetrics.ramUsage)} MB</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Power & Thermal</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Power draw: <span style={{ color: '#00ff00' }}>{systemMetrics.powerDraw.toFixed(1)} W</span></div>
-                        <div>CPU temp: <span style={{ color: '#00ff00' }}>{systemMetrics.temperature.toFixed(1)}°C</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Power & Thermal</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>Power draw: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.powerDraw.toFixed(1)} W</span></div>
+                        <div>CPU temp: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.temperature.toFixed(1)}°C</span></div>
                         <div>Throttling: <span style={{ color: systemMetrics.isThrottling ? '#ff4444' : '#00ff00' }}>{systemMetrics.isThrottling ? 'Yes' : 'No'}</span></div>
-                        <div>Battery: <span style={{ color: '#00ff00' }}>{(100 - systemMetrics.powerDraw / 2).toFixed(1)}%</span></div>
+                        <div>Battery: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(100 - systemMetrics.powerDraw / 2).toFixed(1)}%</span></div>
                       </div>
                     </div>
                   </div>
                   
-                  <div style={{ background: '#1a2a1a', padding: '15px', borderRadius: '6px', border: '1px solid #00aa00' }}>
+                  <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #238636' }}>
                     <h4 style={{ color: '#00ff00', marginBottom: '10px' }}>💡 System Status</h4>
-                    <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                      <div>Disk I/O: <span style={{ color: '#00ff00' }}>{(systemMetrics.ramUsage / 1000).toFixed(1)} MB/s</span></div>
-                      <div>Network: <span style={{ color: '#00ff00' }}>{(systemMetrics.powerDraw / 10).toFixed(1)} MB/s</span></div>
-                      <div>Process PID: <span style={{ color: '#00ff00' }}>{Math.floor(systemMetrics.cpuUtilization * 100) + 1000}</span></div>
-                      <div>Uptime: <span style={{ color: '#00ff00' }}>{Math.floor(systemMetrics.temperature / 10)}h {Math.floor(systemMetrics.powerDraw / 10)}m</span></div>
+                    <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <div>Disk I/O: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.ramUsage / 1000).toFixed(1)} MB/s</span></div>
+                      <div>Network: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.powerDraw / 10).toFixed(1)} MB/s</span></div>
+                      <div>Process PID: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.floor(systemMetrics.cpuUtilization * 100) + 1000}</span></div>
+                      <div>Uptime: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.floor(systemMetrics.temperature / 10)}h {Math.floor(systemMetrics.powerDraw / 10)}m</span></div>
                     </div>
                   </div>
                 </div>
@@ -1347,54 +2076,52 @@ if __name__ == "__main__":
 
               {activeDashboardTab === 'composite' && (
                 <div>
-                  <h3 style={{ color: '#3b82f6', marginBottom: '15px' }}>📊 Composite Insight Metrics</h3>
-                  
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Energy Efficiency</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Tokens/sec per Watt: <span style={{ color: '#00ff00' }}>{compositeMetrics.tokensPerWatt.toFixed(2)} t/s/W</span></div>
-                        <div>Power efficiency: <span style={{ color: '#00ff00' }}>{compositeMetrics.efficiencyRating.toFixed(1)}</span></div>
-                        <div>Battery drain rate: <span style={{ color: '#00ff00' }}>{(systemMetrics.powerDraw / 100).toFixed(2)}%/min</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Energy Efficiency</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>Tokens/sec per Watt: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.tokensPerWatt.toFixed(2)} t/s/W</span></div>
+                        <div>Power efficiency: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.efficiencyRating.toFixed(1)}</span></div>
+                        <div>Battery drain rate: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.powerDraw / 100).toFixed(2)}%/min</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Response Quality</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Response time per token: <span style={{ color: '#00ff00' }}>{modelMetrics.tokensOut > 0 ? (modelMetrics.totalResponseTime / modelMetrics.tokensOut).toFixed(1) : '0.0'} ms/token</span></div>
-                        <div>Decoding smoothness: <span style={{ color: '#00ff00' }}>{Math.min(10, Math.floor(modelMetrics.tokensPerSecond / 2))}/10</span></div>
-                        <div>Quality score: <span style={{ color: '#00ff00' }}>{Math.min(10, Math.floor(compositeMetrics.efficiencyRating))}/10</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Response Quality</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>Response time per token: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.tokensOut > 0 ? (modelMetrics.totalResponseTime / modelMetrics.tokensOut).toFixed(1) : '0.0'} ms/token</span></div>
+                        <div>Decoding smoothness: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.min(10, Math.floor(modelMetrics.tokensPerSecond / 2))}/10</span></div>
+                        <div>Quality score: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.min(10, Math.floor(compositeMetrics.efficiencyRating))}/10</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Resource Balance</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>CPU-GPU balance: <span style={{ color: '#00ff00' }}>{(systemMetrics.cpuUtilization / systemMetrics.gpuUtilization).toFixed(2)}</span></div>
-                        <div>Memory efficiency: <span style={{ color: '#00ff00' }}>{((systemMetrics.ramUsage / 32000) * 100).toFixed(1)}%</span></div>
-                        <div>Load distribution: <span style={{ color: '#00ff00' }}>{systemMetrics.cpuUtilization > systemMetrics.gpuUtilization ? 'CPU-bound' : 'GPU-bound'}</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Resource Balance</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>CPU-GPU balance: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.cpuUtilization / systemMetrics.gpuUtilization).toFixed(2)}</span></div>
+                        <div>Memory efficiency: <span style={{ color: '#7ee787', fontWeight: 600 }}>{((systemMetrics.ramUsage / 32000) * 100).toFixed(1)}%</span></div>
+                        <div>Load distribution: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.cpuUtilization > systemMetrics.gpuUtilization ? 'CPU-bound' : 'GPU-bound'}</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
-                      <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Thermal Performance</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Thermal efficiency: <span style={{ color: '#00ff00' }}>{Math.max(0, Math.floor(10 - systemMetrics.temperature / 10))}/10</span></div>
-                        <div>Sustained duration: <span style={{ color: '#00ff00' }}>{(60 - systemMetrics.temperature / 2).toFixed(1)} min</span></div>
-                        <div>Throttle threshold: <span style={{ color: '#ff4444' }}>{systemMetrics.isThrottling ? '70°C' : '80°C'}</span></div>
-                        <div>Performance curve: <span style={{ color: '#00ff00' }}>{systemMetrics.isThrottling ? 'Decreasing' : 'Stable'}</span></div>
+                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Thermal Performance</h4>
+                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                        <div>Thermal efficiency: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.max(0, Math.floor(10 - systemMetrics.temperature / 10))}/10</span></div>
+                        <div>Sustained duration: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(60 - systemMetrics.temperature / 2).toFixed(1)} min</span></div>
+                        <div>Throttle threshold: <span style={{ color: '#f85149', fontWeight: 600 }}>{systemMetrics.isThrottling ? '70°C' : '80°C'}</span></div>
+                        <div>Performance curve: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.isThrottling ? 'Decreasing' : 'Stable'}</span></div>
                       </div>
                     </div>
                   </div>
                   
-                  <div style={{ background: '#1a2a1a', padding: '15px', borderRadius: '6px', border: '1px solid #00aa00' }}>
+                  <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #238636' }}>
                     <h4 style={{ color: '#00ff00', marginBottom: '10px' }}>💡 Performance Insights</h4>
-                    <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                      <div>Optimal settings detected: <span style={{ color: '#00ff00' }}>{compositeMetrics.efficiencyRating > 7 ? 'Yes' : 'No'}</span></div>
-                      <div>Recommended adjustments: <span style={{ color: '#ffaa00' }}>{systemMetrics.isThrottling ? 'Reduce load' : 'None'}</span></div>
-                      <div>Performance trend: <span style={{ color: '#00ff00' }}>{compositeMetrics.performanceTrend}</span></div>
-                      <div>Efficiency rating: <span style={{ color: '#00ff00' }}>{compositeMetrics.efficiencyRating.toFixed(1)}/10</span></div>
+                    <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <div>Optimal settings detected: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.efficiencyRating > 7 ? 'Yes' : 'No'}</span></div>
+                      <div>Recommended adjustments: <span style={{ color: '#ffa657', fontWeight: 600 }}>{systemMetrics.isThrottling ? 'Reduce load' : 'None'}</span></div>
+                      <div>Performance trend: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.performanceTrend}</span></div>
+                      <div>Efficiency rating: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.efficiencyRating.toFixed(1)}/10</span></div>
                     </div>
                   </div>
                 </div>
