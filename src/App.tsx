@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
-import { metricsCollector, ModelMetrics, SystemMetrics, CompositeMetrics } from './metrics';
+// import { basicMetricsCollector, BasicModelMetrics, BasicSystemMetrics, BasicCompositeMetrics } from './basic-metrics';
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -19,9 +19,36 @@ function App() {
   const [showApiInfo, setShowApiInfo] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [activeDashboardTab, setActiveDashboardTab] = useState('model');
-  const [modelMetrics, setModelMetrics] = useState<ModelMetrics | null>(null);
-  const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
-  const [compositeMetrics, setCompositeMetrics] = useState<CompositeMetrics | null>(null);
+  // Static metrics data - all set to 0
+  const [modelMetrics] = useState({
+    promptToFirstToken: 0,
+    totalResponseTime: 0,
+    tokensPerSecond: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    promptLength: 0,
+    maxTokens: 0,
+    contextUtilization: 0,
+    activeRequests: 0,
+    quantizationFormat: 'Unknown',
+    cacheHitRate: 0,
+    errorCount: 0
+  });
+  
+  const [systemMetrics] = useState({
+    cpuUtilization: 0,
+    gpuUtilization: 0,
+    ramUsage: 0,
+    powerDraw: 0,
+    temperature: 0,
+    isThrottling: false
+  });
+  
+  const [compositeMetrics] = useState({
+    tokensPerWatt: 0,
+    efficiencyRating: 0,
+    performanceTrend: 'Stable'
+  });
   const [isMobile, setIsMobile] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
   const [isROGAllyX, setIsROGAllyX] = useState(false);
@@ -37,24 +64,33 @@ function App() {
   };
 
   // Initialize metrics collection
-  useEffect(() => {
-    metricsCollector.startCollection(2000); // Update every 2 seconds
+  // useEffect(() => {
+  //   console.log('Initializing basic metrics collection...');
     
-    // Update metrics state
-    const updateMetrics = () => {
-      setModelMetrics(metricsCollector.getModelMetrics());
-      setSystemMetrics(metricsCollector.getSystemMetrics());
-      setCompositeMetrics(metricsCollector.getCompositeMetrics());
-    };
+  //   // Update metrics state
+  //   const updateMetrics = () => {
+  //     try {
+  //       const modelData = basicMetricsCollector.getModelMetrics();
+  //       const systemData = basicMetricsCollector.getSystemMetrics();
+  //       const compositeData = basicMetricsCollector.getCompositeMetrics();
+        
+  //       console.log('Updating metrics:', { modelData, systemData, compositeData });
+        
+  //       setModelMetrics(modelData);
+  //       setSystemMetrics(systemData);
+  //       setCompositeMetrics(compositeData);
+  //     } catch (error) {
+  //       console.error('Error updating metrics:', error);
+  //     }
+  //   };
     
-    updateMetrics();
-    const interval = setInterval(updateMetrics, 2000);
+  //   updateMetrics();
+  //   const interval = setInterval(updateMetrics, 2000);
     
-    return () => {
-      clearInterval(interval);
-      metricsCollector.stopCollection();
-    };
-  }, []);
+  //   return () => {
+  //     clearInterval(interval);
+  //   };
+  // }, []);
 
   // Responsive design detection
   useEffect(() => {
@@ -114,6 +150,8 @@ function App() {
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
     
+    console.log('Starting message send...');
+    
     const newMessage = {
       role: 'user' as const,
       content: inputMessage,
@@ -143,6 +181,13 @@ function App() {
         stream: true,
       };
 
+      console.log('Sending request to:', endpoint);
+      console.log('Request payload:', request);
+
+      // Add timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
       const response = await fetch(`${endpoint}/v1/chat/completions`, {
         method: 'POST',
         headers: {
@@ -150,10 +195,18 @@ function App() {
           ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
         },
         body: JSON.stringify(request),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers);
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('Response error:', errorText);
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
 
       const reader = response.body?.getReader();
@@ -180,11 +233,20 @@ function App() {
         'in conclusion', 'so the answer', 'here\'s what i found'
       ];
 
+      console.log('Starting to read stream...');
+      let chunkCount = 0;
+      let hasReceivedContent = false;
+      
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          console.log('Stream completed');
+          break;
+        }
 
+        chunkCount++;
         const chunk = decoder.decode(value);
+        console.log(`Chunk ${chunkCount}:`, chunk.substring(0, 100) + (chunk.length > 100 ? '...' : ''));
         const lines = chunk.split('\n').filter(line => line.trim() !== '');
 
         for (const line of lines) {
@@ -235,10 +297,12 @@ function App() {
                   const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '');
                   accumulatedThinking += cleanContent;
                   setThinkingContent(accumulatedThinking);
+                  hasReceivedContent = true;
                 } else {
                   const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '');
                   accumulatedContent += cleanContent;
                   setResponseContent(accumulatedContent);
+                  hasReceivedContent = true;
                 }
               }
             } catch (e) {
@@ -246,6 +310,12 @@ function App() {
             }
           }
         }
+      }
+
+      // Check if we received any content
+      if (!hasReceivedContent) {
+        console.warn('No content received from stream, adding fallback message');
+        accumulatedContent = 'I apologize, but I encountered an issue processing your request. Please try again.';
       }
 
       // Add final response to messages
@@ -259,33 +329,71 @@ function App() {
       ]);
 
       // Record metrics for successful inference
-      const endTime = Date.now();
-      const totalTime = endTime - startTime;
-      const firstTokenLatency = firstTokenTime - startTime;
-      const tokensPerSecond = accumulatedContent.length / (totalTime / 1000);
-      
-      metricsCollector.recordInference(
-        currentInput.length,
-        accumulatedContent.length,
-        totalTime,
-        firstTokenLatency,
-        tokensPerSecond,
-        'FP16' // Default quantization format
-      );
+      try {
+        const endTime = Date.now();
+        const totalTime = endTime - startTime;
+        const firstTokenLatency = firstTokenTime - startTime;
+        const tokensPerSecond = accumulatedContent.length / (totalTime / 1000);
+        
+        // Record metrics for real-time dashboard
+        // console.log('Recording inference metrics:', {
+        //   promptLength: currentInput.length,
+        //   responseLength: accumulatedContent.length,
+        //   totalTime,
+        //   firstTokenLatency,
+        //   tokensPerSecond
+        // });
+        
+        // basicMetricsCollector.recordInference(
+        //   currentInput.length,
+        //   accumulatedContent.length,
+        //   totalTime,
+        //   firstTokenLatency,
+        //   tokensPerSecond,
+        //   'FP16' // Default quantization format
+        // );
+        
+        // console.log('Metrics recorded successfully');
+        
+        console.log('Inference completed:', {
+          promptLength: currentInput.length,
+          responseLength: accumulatedContent.length,
+          totalTime,
+          firstTokenLatency,
+          tokensPerSecond
+        });
+      } catch (error) {
+        console.error('Error recording metrics:', error);
+      }
 
     } catch (error) {
       console.error('Error sending message:', error);
+      
+      let errorMessage = 'Unknown error occurred';
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          errorMessage = 'Request timed out. Please try again.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       setMessages(prev => [
         ...prev,
         {
           role: 'assistant',
-          content: `Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`,
+          content: `Error: ${errorMessage}`,
           timestamp: new Date(),
         },
       ]);
       
       // Record error metrics
-      metricsCollector.recordError();
+      // try {
+      //   basicMetricsCollector.recordError();
+      //   console.log('Error recorded for inference');
+      // } catch (error) {
+      //   console.error('Error recording error metrics:', error);
+      // }
     } finally {
       setIsLoading(false);
       setIsThinking(false);
@@ -507,6 +615,38 @@ if __name__ == "__main__":
               >
                 📊 Dashboard
               </button>
+              <button 
+                className="control-button"
+                onClick={async () => {
+                  console.log('Testing connection...');
+                  try {
+                    const endpoint = selectedModel === 'Custom Endpoint' ? customEndpoint : 
+                                    selectedModel === 'Ollama (Local)' ? 'http://localhost:11434' : 
+                                    'http://localhost:1234';
+                    const response = await fetch(`${endpoint}/v1/models`);
+                    console.log('Connection test result:', response.status, await response.text());
+                  } catch (error) {
+                    console.error('Connection test failed:', error);
+                  }
+                }}
+              >
+                🔍 Test
+              </button>
+              {/* <button 
+                className="control-button"
+                onClick={() => {
+                  console.log('Testing metrics collection...');
+                  console.log('Current model metrics:', simpleMetricsCollector.getModelMetrics());
+                  console.log('Current system metrics:', simpleMetricsCollector.getSystemMetrics());
+                  console.log('Current composite metrics:', simpleMetricsCollector.getCompositeMetrics());
+                  
+                  // Test recording some metrics
+                  simpleMetricsCollector.recordInference(100, 50, 2000, 500, 25, 'FP16');
+                  console.log('Recorded test inference');
+                }}
+              >
+                📊 Test Metrics
+              </button> */}
               <button 
                 className="clear-button"
                 onClick={handleClearChat}
@@ -1047,35 +1187,35 @@ if __name__ == "__main__":
                     <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Latency</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Prompt-to-first-token: <span style={{ color: '#00ff00' }}>{modelMetrics?.promptToFirstToken.toFixed(1) || '--'} ms</span></div>
-                        <div>Total response time: <span style={{ color: '#00ff00' }}>{modelMetrics?.totalResponseTime.toFixed(1) || '--'} ms</span></div>
+                        <div>Prompt-to-first-token: <span style={{ color: '#00ff00' }}>{modelMetrics.promptToFirstToken.toFixed(1)} ms</span></div>
+                        <div>Total response time: <span style={{ color: '#00ff00' }}>{modelMetrics.totalResponseTime.toFixed(1)} ms</span></div>
                       </div>
                     </div>
                     
                     <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Token Throughput</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Tokens/sec: <span style={{ color: '#00ff00' }}>{modelMetrics?.tokensPerSecond.toFixed(1) || '--'} t/s</span></div>
-                        <div>Tokens in/out: <span style={{ color: '#00ff00' }}>{modelMetrics?.tokensIn || '--'} / {modelMetrics?.tokensOut || '--'}</span></div>
+                        <div>Tokens/sec: <span style={{ color: '#00ff00' }}>{modelMetrics.tokensPerSecond.toFixed(1)} t/s</span></div>
+                        <div>Tokens in/out: <span style={{ color: '#00ff00' }}>{modelMetrics.tokensIn} / {modelMetrics.tokensOut}</span></div>
                       </div>
                     </div>
                     
                     <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Context Utilization</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Prompt length: <span style={{ color: '#00ff00' }}>{modelMetrics?.promptLength || '--'} tokens</span></div>
-                        <div>Max tokens: <span style={{ color: '#00ff00' }}>{modelMetrics?.maxTokens || '--'} tokens</span></div>
-                        <div>Utilization: <span style={{ color: '#00ff00' }}>{modelMetrics?.contextUtilization.toFixed(1) || '--'}%</span></div>
+                        <div>Prompt length: <span style={{ color: '#00ff00' }}>{modelMetrics.promptLength} tokens</span></div>
+                        <div>Max tokens: <span style={{ color: '#00ff00' }}>{modelMetrics.maxTokens} tokens</span></div>
+                        <div>Utilization: <span style={{ color: '#00ff00' }}>{modelMetrics.contextUtilization.toFixed(1)}%</span></div>
                       </div>
                     </div>
                     
                     <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Performance</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Active requests: <span style={{ color: '#00ff00' }}>{modelMetrics?.activeRequests || '--'}</span></div>
-                        <div>Quantization: <span style={{ color: '#00ff00' }}>{modelMetrics?.quantizationFormat || '--'}</span></div>
-                        <div>Cache hit rate: <span style={{ color: '#00ff00' }}>{modelMetrics?.cacheHitRate.toFixed(1) || '--'}%</span></div>
-                        <div>Errors: <span style={{ color: '#ff4444' }}>{modelMetrics?.errorCount || '--'}</span></div>
+                        <div>Active requests: <span style={{ color: '#00ff00' }}>{modelMetrics.activeRequests}</span></div>
+                        <div>Quantization: <span style={{ color: '#00ff00' }}>{modelMetrics.quantizationFormat}</span></div>
+                        <div>Cache hit rate: <span style={{ color: '#00ff00' }}>{modelMetrics.cacheHitRate.toFixed(1)}%</span></div>
+                        <div>Errors: <span style={{ color: '#ff4444' }}>{modelMetrics.errorCount}</span></div>
                       </div>
                     </div>
                   </div>
@@ -1100,37 +1240,37 @@ if __name__ == "__main__":
                     <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 CPU Utilization</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Overall: <span style={{ color: '#00ff00' }}>{systemMetrics?.cpuUtilization.toFixed(1) || '--'}%</span></div>
-                        <div>Per-core avg: <span style={{ color: '#00ff00' }}>{systemMetrics?.cpuPerCore ? (systemMetrics.cpuPerCore.reduce((a, b) => a + b, 0) / systemMetrics.cpuPerCore.length).toFixed(1) : '--'}%</span></div>
-                        <div>Thread count: <span style={{ color: '#00ff00' }}>{systemMetrics?.threadCount || '--'}</span></div>
+                        <div>Overall: <span style={{ color: '#00ff00' }}>0.0%</span></div>
+                        <div>Per-core avg: <span style={{ color: '#00ff00' }}>0.0%</span></div>
+                        <div>Thread count: <span style={{ color: '#00ff00' }}>0</span></div>
                       </div>
                     </div>
                     
                     <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 GPU Utilization</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Compute: <span style={{ color: '#00ff00' }}>{systemMetrics?.gpuUtilization.toFixed(1) || '--'}%</span></div>
-                        <div>Memory: <span style={{ color: '#00ff00' }}>{systemMetrics?.gpuMemoryUsage.toFixed(0) || '--'} MB</span></div>
-                        <div>Temperature: <span style={{ color: '#00ff00' }}>{systemMetrics?.gpuTemperature.toFixed(1) || '--'}°C</span></div>
+                        <div>Compute: <span style={{ color: '#00ff00' }}>0.0%</span></div>
+                        <div>Memory: <span style={{ color: '#00ff00' }}>0 MB</span></div>
+                        <div>Temperature: <span style={{ color: '#00ff00' }}>0.0°C</span></div>
                       </div>
                     </div>
                     
                     <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Memory</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>RAM usage: <span style={{ color: '#00ff00' }}>{systemMetrics?.ramUsage.toFixed(0) || '--'} MB</span></div>
-                        <div>Swap activity: <span style={{ color: '#00ff00' }}>{systemMetrics?.swapActivity.toFixed(0) || '--'} MB</span></div>
-                        <div>Available: <span style={{ color: '#00ff00' }}>{systemMetrics?.availableMemory.toFixed(0) || '--'} MB</span></div>
+                        <div>RAM usage: <span style={{ color: '#00ff00' }}>0 MB</span></div>
+                        <div>Swap activity: <span style={{ color: '#00ff00' }}>0 MB</span></div>
+                        <div>Available: <span style={{ color: '#00ff00' }}>0 MB</span></div>
                       </div>
                     </div>
                     
                     <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Power & Thermal</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Power draw: <span style={{ color: '#00ff00' }}>{systemMetrics?.powerDraw.toFixed(1) || '--'} W</span></div>
-                        <div>CPU temp: <span style={{ color: '#00ff00' }}>{systemMetrics?.cpuTemperature.toFixed(1) || '--'}°C</span></div>
-                        <div>Throttling: <span style={{ color: systemMetrics?.isThrottling ? '#ff4444' : '#00ff00' }}>{systemMetrics?.isThrottling ? 'Yes' : 'No'}</span></div>
-                        <div>Battery: <span style={{ color: '#00ff00' }}>{systemMetrics?.batteryLevel.toFixed(1) || '--'}%</span></div>
+                        <div>Power draw: <span style={{ color: '#00ff00' }}>0.0 W</span></div>
+                        <div>CPU temp: <span style={{ color: '#00ff00' }}>0.0°C</span></div>
+                        <div>Throttling: <span style={{ color: '#00ff00' }}>No</span></div>
+                        <div>Battery: <span style={{ color: '#00ff00' }}>0.0%</span></div>
                       </div>
                     </div>
                   </div>
@@ -1138,10 +1278,10 @@ if __name__ == "__main__":
                   <div style={{ background: '#1a2a1a', padding: '15px', borderRadius: '6px', border: '1px solid #00aa00' }}>
                     <h4 style={{ color: '#00ff00', marginBottom: '10px' }}>💡 System Status</h4>
                     <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                      <div>Disk I/O: <span style={{ color: '#00ff00' }}>{systemMetrics?.diskIO.toFixed(1) || '--'} MB/s</span></div>
-                      <div>Network: <span style={{ color: '#00ff00' }}>{systemMetrics?.networkThroughput.toFixed(1) || '--'} MB/s</span></div>
-                      <div>Process PID: <span style={{ color: '#00ff00' }}>{systemMetrics?.processId || '--'}</span></div>
-                      <div>Uptime: <span style={{ color: '#00ff00' }}>{systemMetrics?.uptime ? Math.floor(systemMetrics.uptime / 3600) + 'h ' + Math.floor((systemMetrics.uptime % 3600) / 60) + 'm' : '--'}</span></div>
+                      <div>Disk I/O: <span style={{ color: '#00ff00' }}>0.0 MB/s</span></div>
+                      <div>Network: <span style={{ color: '#00ff00' }}>0.0 MB/s</span></div>
+                      <div>Process PID: <span style={{ color: '#00ff00' }}>0</span></div>
+                      <div>Uptime: <span style={{ color: '#00ff00' }}>0h 0m</span></div>
                     </div>
                   </div>
                 </div>
@@ -1155,37 +1295,37 @@ if __name__ == "__main__":
                     <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Energy Efficiency</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Tokens/sec per Watt: <span style={{ color: '#00ff00' }}>{compositeMetrics?.tokensPerWatt.toFixed(2) || '--'} t/s/W</span></div>
-                        <div>Power efficiency: <span style={{ color: '#00ff00' }}>{compositeMetrics?.powerEfficiency.toFixed(1) || '--'}</span></div>
-                        <div>Battery drain rate: <span style={{ color: '#00ff00' }}>{compositeMetrics?.batteryDrainRate.toFixed(2) || '--'}%/min</span></div>
+                        <div>Tokens/sec per Watt: <span style={{ color: '#00ff00' }}>0.00 t/s/W</span></div>
+                        <div>Power efficiency: <span style={{ color: '#00ff00' }}>0.0</span></div>
+                        <div>Battery drain rate: <span style={{ color: '#00ff00' }}>0.00%/min</span></div>
                       </div>
                     </div>
                     
                     <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Response Quality</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Response time per token: <span style={{ color: '#00ff00' }}>{compositeMetrics?.responseTimePerToken.toFixed(1) || '--'} ms/token</span></div>
-                        <div>Decoding smoothness: <span style={{ color: '#00ff00' }}>{compositeMetrics?.decodingSmoothness.toFixed(1) || '--'}/10</span></div>
-                        <div>Quality score: <span style={{ color: '#00ff00' }}>{compositeMetrics?.qualityScore.toFixed(1) || '--'}/10</span></div>
+                        <div>Response time per token: <span style={{ color: '#00ff00' }}>0.0 ms/token</span></div>
+                        <div>Decoding smoothness: <span style={{ color: '#00ff00' }}>0/10</span></div>
+                        <div>Quality score: <span style={{ color: '#00ff00' }}>0/10</span></div>
                       </div>
                     </div>
                     
                     <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Resource Balance</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>CPU-GPU balance: <span style={{ color: '#00ff00' }}>{compositeMetrics?.cpuGpuBalance.toFixed(2) || '--'}</span></div>
-                        <div>Memory efficiency: <span style={{ color: '#00ff00' }}>{compositeMetrics?.memoryEfficiency.toFixed(1) || '--'}%</span></div>
-                        <div>Load distribution: <span style={{ color: '#00ff00' }}>{compositeMetrics?.loadDistribution || '--'}</span></div>
+                        <div>CPU-GPU balance: <span style={{ color: '#00ff00' }}>0.00</span></div>
+                        <div>Memory efficiency: <span style={{ color: '#00ff00' }}>0%</span></div>
+                        <div>Load distribution: <span style={{ color: '#00ff00' }}>Unknown</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid '#444' }}>
+                    <div style={{ background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                       <h4 style={{ color: '#ff8c00', marginBottom: '10px' }}>🔹 Thermal Performance</h4>
                       <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                        <div>Thermal efficiency: <span style={{ color: '#00ff00' }}>{compositeMetrics?.thermalEfficiency.toFixed(1) || '--'}/10</span></div>
-                        <div>Sustained duration: <span style={{ color: '#00ff00' }}>{compositeMetrics?.sustainedDuration.toFixed(1) || '--'} min</span></div>
-                        <div>Throttle threshold: <span style={{ color: '#ff4444' }}>{compositeMetrics?.throttleThreshold.toFixed(1) || '--'}°C</span></div>
-                        <div>Performance curve: <span style={{ color: '#00ff00' }}>{compositeMetrics?.performanceCurve || '--'}</span></div>
+                        <div>Thermal efficiency: <span style={{ color: '#00ff00' }}>0/10</span></div>
+                        <div>Sustained duration: <span style={{ color: '#00ff00' }}>0.0 min</span></div>
+                        <div>Throttle threshold: <span style={{ color: '#ff4444' }}>0°C</span></div>
+                        <div>Performance curve: <span style={{ color: '#00ff00' }}>Unknown</span></div>
                       </div>
                     </div>
                   </div>
@@ -1193,10 +1333,10 @@ if __name__ == "__main__":
                   <div style={{ background: '#1a2a1a', padding: '15px', borderRadius: '6px', border: '1px solid #00aa00' }}>
                     <h4 style={{ color: '#00ff00', marginBottom: '10px' }}>💡 Performance Insights</h4>
                     <div style={{ fontSize: '0.9rem', color: '#ccc' }}>
-                      <div>Optimal settings detected: <span style={{ color: '#00ff00' }}>{compositeMetrics?.optimalSettings || '--'}</span></div>
-                      <div>Recommended adjustments: <span style={{ color: '#ffaa00' }}>{compositeMetrics?.recommendedAdjustments || '--'}</span></div>
-                      <div>Performance trend: <span style={{ color: '#00ff00' }}>{compositeMetrics?.performanceTrend || '--'}</span></div>
-                      <div>Efficiency rating: <span style={{ color: '#00ff00' }}>{compositeMetrics?.efficiencyRating.toFixed(1) || '--'}/10</span></div>
+                      <div>Optimal settings detected: <span style={{ color: '#00ff00' }}>None</span></div>
+                      <div>Recommended adjustments: <span style={{ color: '#ffaa00' }}>None</span></div>
+                      <div>Performance trend: <span style={{ color: '#00ff00' }}>Stable</span></div>
+                      <div>Efficiency rating: <span style={{ color: '#00ff00' }}>0/10</span></div>
                     </div>
                   </div>
                 </div>
