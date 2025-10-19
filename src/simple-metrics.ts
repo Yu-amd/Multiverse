@@ -62,7 +62,7 @@ export class SimpleMetricsCollector {
   private systemMetrics: SimpleSystemMetrics;
   private compositeMetrics: SimpleCompositeMetrics;
   private isCollecting: boolean = false;
-  private collectionInterval: NodeJS.Timeout | null = null;
+  private collectionInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.modelMetrics = this.initializeModelMetrics();

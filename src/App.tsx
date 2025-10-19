@@ -2,8 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 // import { basicMetricsCollector, BasicModelMetrics, BasicSystemMetrics, BasicCompositeMetrics } from './basic-metrics';
 
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
+
 function App() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [selectedModel, setSelectedModel] = useState('LM Studio (Local)');
@@ -227,8 +233,8 @@ function App() {
     
     console.log('Starting message send...');
     
-    const newMessage = {
-      role: 'user' as const,
+    const newMessage: Message = {
+      role: 'user',
       content: inputMessage,
       timestamp: new Date(),
     };
@@ -397,10 +403,10 @@ function App() {
       setMessages(prev => [
         ...prev,
         {
-          role: 'assistant',
+          role: 'assistant' as const,
           content: accumulatedContent,
           timestamp: new Date(),
-        },
+        } as Message,
       ]);
 
       // Record metrics for successful inference
@@ -445,10 +451,10 @@ function App() {
       setMessages(prev => [
         ...prev,
         {
-          role: 'assistant',
+          role: 'assistant' as const,
           content: `Error: ${errorMessage}`,
           timestamp: new Date(),
-        },
+        } as Message,
       ]);
       
       // Record error metrics
@@ -487,8 +493,8 @@ function App() {
                     'http://localhost:1234';
     
     // Create a clean conversation history without empty messages
-    const cleanMessages = messages.filter(msg => msg.content.trim() !== '');
-    const conversationHistory = cleanMessages.map(msg => 
+    const cleanMessages = messages.filter((msg: Message) => msg.content.trim() !== '');
+    const conversationHistory = cleanMessages.map((msg: Message) => 
       `            {"role": "${msg.role}", "content": ${JSON.stringify(msg.content)}}`
     ).join(',\n');
     
@@ -655,8 +661,8 @@ if __name__ == "__main__":
                     selectedModel === 'Ollama (Local)' ? 'http://localhost:11434' : 
                     'http://localhost:1234';
     
-    const cleanMessages = messages.filter(msg => msg.content.trim() !== '');
-    const conversationHistory = cleanMessages.map(msg => 
+    const cleanMessages = messages.filter((msg: Message) => msg.content.trim() !== '');
+    const conversationHistory = cleanMessages.map((msg: Message) => 
       `        { role: "${msg.role}", content: ${JSON.stringify(msg.content)} }`
     ).join(',\n');
     
@@ -813,8 +819,8 @@ if (require.main === module) {
                     selectedModel === 'Ollama (Local)' ? 'http://localhost:11434' : 
                     'http://localhost:1234';
     
-    const cleanMessages = messages.filter(msg => msg.content.trim() !== '');
-    const conversationHistory = cleanMessages.map(msg => 
+    const cleanMessages = messages.filter((msg: Message) => msg.content.trim() !== '');
+    const conversationHistory = cleanMessages.map((msg: Message) => 
       `      {"role": "${msg.role}", "content": ${JSON.stringify(msg.content)}}`
     ).join(',\\n');
     
@@ -905,8 +911,8 @@ done
                     selectedModel === 'Ollama (Local)' ? 'http://localhost:11434' : 
                     'http://localhost:1234';
     
-    const cleanMessages = messages.filter(msg => msg.content.trim() !== '');
-    const conversationHistory = cleanMessages.map(msg => 
+    const cleanMessages = messages.filter((msg: Message) => msg.content.trim() !== '');
+    const conversationHistory = cleanMessages.map((msg: Message) => 
       `        Message { role: "${msg.role}".to_string(), content: ${JSON.stringify(msg.content)}.to_string() }`
     ).join(',\n');
     
@@ -1175,7 +1181,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       if (language === 'python') {
         // Tokenize: find strings and comments first, then process the rest
         let remaining = escapedLine;
-        let match;
         
         // Find comments
         const commentMatch = remaining.match(/#.*$/);
@@ -1399,7 +1404,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           </div>
 
           <div className="chat-messages" ref={chatMessagesRef}>
-            {messages.map((message, index) => (
+            {messages.map((message: Message, index: number) => (
               <div key={index} className={`message ${message.role}`}>
                 <div>{message.content}</div>
               </div>
