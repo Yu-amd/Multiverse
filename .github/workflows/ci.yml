@@ -35,11 +35,11 @@ jobs:
 
       - name: Start mock LLM server
         run: |
-          node scripts/mock-llm-server.js &
+          nohup node scripts/mock-llm-server.js > mock-server.log 2>&1 &
           echo $! > mock-server.pid
           sleep 5
           # Verify server is running
-          curl -f http://localhost:1234/health || exit 1
+          curl -f http://localhost:1234/health || (echo "Server failed to start, checking logs:" && cat mock-server.log && exit 1)
           echo "Mock server is running on port 1234"
 
       - name: Test mock server
@@ -61,6 +61,11 @@ jobs:
           if [ -f mock-server.pid ]; then
             kill $(cat mock-server.pid) || true
             sleep 2
+          fi
+          # Show server logs for debugging
+          if [ -f mock-server.log ]; then
+            echo "Mock server logs:"
+            cat mock-server.log
           fi
 
       - name: Upload Playwright report

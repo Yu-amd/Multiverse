@@ -9,7 +9,7 @@
  * - Useful for CI/CD and local testing without a real LLM
  */
 
-const http = require('http');
+import http from 'http';
 
 const PORT = process.env.MOCK_LLM_PORT || 1234;
 
