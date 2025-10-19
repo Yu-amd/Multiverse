@@ -1,19 +1,33 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Multiverse AI Playground - Smoke Tests', () => {
+  test('should have mock server running', async ({ page }) => {
+    // Test that the mock server is accessible
+    const response = await page.request.get('http://localhost:1234/health');
+    expect(response.status()).toBe(200);
+    
+    const data = await response.json();
+    expect(data.status).toBe('ok');
+  });
   test('should load the app successfully', async ({ page }) => {
     await page.goto('/');
     
+    // Wait for the app to load
+    await page.waitForLoadState('networkidle');
+    
     // Check that the page title or main elements are present
-    await expect(page.locator('.app-container')).toBeVisible();
+    await expect(page.locator('.app-container')).toBeVisible({ timeout: 10000 });
   });
 
   test('should display chat container and code panel', async ({ page }) => {
     await page.goto('/');
     
+    // Wait for the app to load
+    await page.waitForLoadState('networkidle');
+    
     // Verify main UI components are visible
-    await expect(page.locator('.chat-container')).toBeVisible();
-    await expect(page.locator('.code-panel')).toBeVisible();
+    await expect(page.locator('.chat-container')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.code-panel')).toBeVisible({ timeout: 10000 });
   });
 
   test('should have control buttons', async ({ page }) => {
