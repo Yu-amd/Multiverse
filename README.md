@@ -123,7 +123,6 @@ Multiverse/
 ├── tests/            # Playwright tests
 ├── scripts/          # Helper scripts (mock server)
 ├── .github/          # CI/CD workflows
-└── README_PROOF.md   # Proof of working + demo
 ```
 
 ## Contributing
@@ -133,9 +132,6 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 ## Documentation
 
 - 🚀 [Quick Start Guide](QUICKSTART.md) - Get running in 5 minutes
-- 🎥 [Proof of Working](README_PROOF.md) - Screenshots, tests, and demo video
-- 🤝 [Contributing Guide](CONTRIBUTING.md) - How to contribute
-- 📋 [License](LICENSE) - Apache License 2.0
 
 ## License
 
