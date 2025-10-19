@@ -1,5 +1,9 @@
 # Multiverse - AI Model Playground
 
+<div align="center">
+  <img src="multiverse_icon.png" alt="Multiverse Icon" width="128" height="128">
+</div>
+
 A simplified, responsive AI model playground for testing different AI models across multiple devices.
 
 [![CI Status](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
