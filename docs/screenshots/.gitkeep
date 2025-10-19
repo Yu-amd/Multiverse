@@ -1,0 +1,12 @@
+# Screenshots Directory
+
+Place your screenshots here:
+- desktop.png - Desktop layout screenshot
+- rog-ally-x.png - ROG Ally X layout screenshot
+- mobile.png - Mobile layout screenshot (optional)
+
+You can capture these with:
+- Browser dev tools (F12 → Device toolbar)
+- Playwright screenshot: `await page.screenshot({ path: 'docs/screenshots/desktop.png' })`
+- Manual screenshots from your device
+
