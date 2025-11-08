@@ -143,22 +143,110 @@ const HintIcon: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
+// Simple markdown renderer for chat messages
+const renderMarkdown = (text: string): string => {
+  // Escape HTML first
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  
+  // Code blocks (```code```)
+  html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+  
+  // Inline code (`code`)
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  
+  // Bold (**text** or __text__)
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+  
+  // Italic (*text* or _text_)
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/_(.+?)_/g, '<em>$1</em>');
+  
+  // Links [text](url)
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  
+  // Line breaks
+  html = html.replace(/\n/g, '<br>');
+  
+  return html;
+};
+
+// Conversation interface for localStorage
+interface SavedConversation {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: string;
+  updatedAt: string;
+  model: string;
+  endpoint: string;
+}
+
 function App() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Load settings from localStorage on mount
+  const loadSettings = () => {
+    try {
+      const saved = localStorage.getItem('multiverse-settings');
+      if (saved) {
+        const settings = JSON.parse(saved);
+        return {
+          selectedModel: settings.selectedModel || 'LM Studio (Local)',
+          customEndpoint: settings.customEndpoint || 'http://localhost:1234',
+          apiKey: settings.apiKey || '',
+          temperature: settings.temperature ?? 0.7,
+          maxTokens: settings.maxTokens ?? 2048,
+          topP: settings.topP ?? 0.9
+        };
+      }
+    } catch (e) {
+      console.warn('Failed to load settings:', e);
+    }
+    return {
+      selectedModel: 'LM Studio (Local)',
+      customEndpoint: 'http://localhost:1234',
+      apiKey: '',
+      temperature: 0.7,
+      maxTokens: 2048,
+      topP: 0.9
+    };
+  };
+
+  // Load conversation from localStorage on mount
+  const loadConversation = () => {
+    try {
+      const saved = localStorage.getItem('multiverse-current-conversation');
+      if (saved) {
+        const conversation = JSON.parse(saved);
+        return conversation.messages || [];
+      }
+    } catch (e) {
+      console.warn('Failed to load conversation:', e);
+    }
+    return [];
+  };
+
+  const initialSettings = loadSettings();
+  const initialMessages = loadConversation();
+
+  const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [inputMessage, setInputMessage] = useState('');
   const [showSettings, setShowSettings] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('LM Studio (Local)');
-  const [customEndpoint, setCustomEndpoint] = useState('http://localhost:1234');
-  const [apiKey, setApiKey] = useState('');
-  const [temperature, setTemperature] = useState(0.7);
-  const [maxTokens, setMaxTokens] = useState(2048);
-  const [topP, setTopP] = useState(0.9);
+  const [selectedModel, setSelectedModel] = useState(initialSettings.selectedModel);
+  const [customEndpoint, setCustomEndpoint] = useState(initialSettings.customEndpoint);
+  const [apiKey, setApiKey] = useState(initialSettings.apiKey);
+  const [temperature, setTemperature] = useState(initialSettings.temperature);
+  const [maxTokens, setMaxTokens] = useState(initialSettings.maxTokens);
+  const [topP, setTopP] = useState(initialSettings.topP);
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [thinkingContent, setThinkingContent] = useState('');
   const [responseContent, setResponseContent] = useState('');
   const [showApiInfo, setShowApiInfo] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
+  const [showConversationHistory, setShowConversationHistory] = useState(false);
   const [activeDashboardTab, setActiveDashboardTab] = useState('model');
   const [selectedLanguage, setSelectedLanguage] = useState('python');
   // Metrics data - will be updated with real values
@@ -878,6 +966,114 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
+  // Save conversation to localStorage whenever messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      const conversation = {
+        id: 'current',
+        title: messages.length > 0 ? messages[0].content.substring(0, 50) : 'New Conversation',
+        messages: messages,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        model: selectedModel,
+        endpoint: customEndpoint
+      };
+      try {
+        localStorage.setItem('multiverse-current-conversation', JSON.stringify(conversation));
+      } catch (e) {
+        console.warn('Failed to save conversation:', e);
+      }
+    }
+  }, [messages, selectedModel, customEndpoint]);
+
+  // Save settings to localStorage whenever settings change
+  useEffect(() => {
+    try {
+      const settings = {
+        selectedModel,
+        customEndpoint,
+        apiKey,
+        temperature,
+        maxTokens,
+        topP
+      };
+      localStorage.setItem('multiverse-settings', JSON.stringify(settings));
+    } catch (e) {
+      console.warn('Failed to save settings:', e);
+    }
+  }, [selectedModel, customEndpoint, apiKey, temperature, maxTokens, topP]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in input fields (except Ctrl+Enter in textarea)
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.isContentEditable) {
+        // Allow Ctrl+Enter in textarea to send message
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && target.tagName === 'TEXTAREA') {
+          e.preventDefault();
+          if (!isLoading && inputMessage.trim()) {
+            const sendButton = document.querySelector('.send-button') as HTMLButtonElement;
+            if (sendButton && !sendButton.disabled) {
+              sendButton.click();
+            }
+          }
+          return;
+        }
+        // Don't trigger other shortcuts when typing
+        if (e.key !== 'Escape') return;
+      }
+
+      // Ctrl/Cmd + Enter: Send message
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (!isLoading && inputMessage.trim()) {
+          const sendButton = document.querySelector('.send-button') as HTMLButtonElement;
+          if (sendButton && !sendButton.disabled) {
+            sendButton.click();
+          }
+        }
+      }
+      
+      // Ctrl/Cmd + K: Focus input
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        const input = document.querySelector('.chat-input') as HTMLTextAreaElement;
+        if (input) {
+          input.focus();
+        }
+      }
+      
+      // Ctrl/Cmd + /: Show shortcuts
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+        e.preventDefault();
+        alert('Keyboard Shortcuts:\n\nCtrl/Cmd + Enter: Send message\nCtrl/Cmd + K: Focus input\nCtrl/Cmd + ,: Open settings\nCtrl/Cmd + D: Open dashboard\nEscape: Close modals');
+      }
+      
+      // Ctrl/Cmd + ,: Open settings
+      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+        e.preventDefault();
+        setShowSettings(true);
+      }
+      
+      // Ctrl/Cmd + D: Open dashboard
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        setShowDashboard(true);
+      }
+      
+      // Escape: Close modals
+      if (e.key === 'Escape') {
+        if (showSettings) setShowSettings(false);
+        if (showDashboard) setShowDashboard(false);
+        if (showApiInfo) setShowApiInfo(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [inputMessage, isLoading, showSettings, showDashboard, showApiInfo]);
+
   // Real hardware detection on mount
   useEffect(() => {
     let mounted = true;
@@ -1244,8 +1440,190 @@ function App() {
     }
   };
 
+
+  // Copy message to clipboard
+  const handleCopyMessage = async (content: string, event?: React.MouseEvent<HTMLButtonElement>) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      // Show brief feedback (could be improved with a toast)
+      if (event?.currentTarget) {
+        const button = event.currentTarget;
+        const originalText = button.textContent;
+        button.textContent = '✓ Copied';
+        setTimeout(() => {
+          button.textContent = originalText;
+        }, 2000);
+      }
+    } catch (err) {
+      console.error('Failed to copy message:', err);
+      alert('Failed to copy to clipboard');
+    }
+  };
+
   const handleClearChat = () => {
     setMessages([]);
+    localStorage.removeItem('multiverse-current-conversation');
+  };
+
+  // Get all saved conversations
+  const getSavedConversations = (): SavedConversation[] => {
+    try {
+      const saved = localStorage.getItem('multiverse-conversations');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn('Failed to load conversations:', e);
+    }
+    return [];
+  };
+
+  // Save conversation to list
+  const saveConversationToList = () => {
+    if (messages.length === 0) return;
+    
+    try {
+      const conversations = getSavedConversations();
+      const conversation: SavedConversation = {
+        id: Date.now().toString(),
+        title: messages[0]?.content.substring(0, 50) || 'New Conversation',
+        messages: messages,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        model: selectedModel,
+        endpoint: customEndpoint
+      };
+      conversations.unshift(conversation); // Add to beginning
+      // Keep only last 50 conversations
+      const limited = conversations.slice(0, 50);
+      localStorage.setItem('multiverse-conversations', JSON.stringify(limited));
+    } catch (e) {
+      console.warn('Failed to save conversation:', e);
+    }
+  };
+
+  // Load conversation from list
+  const loadConversationFromList = (conversationId: string) => {
+    try {
+      const conversations = getSavedConversations();
+      const conversation = conversations.find(c => c.id === conversationId);
+      if (conversation) {
+        setMessages(conversation.messages);
+        setSelectedModel(conversation.model);
+        setCustomEndpoint(conversation.endpoint);
+        setShowConversationHistory(false);
+      }
+    } catch (e) {
+      console.warn('Failed to load conversation:', e);
+    }
+  };
+
+  // Delete conversation from list
+  const deleteConversation = (conversationId: string) => {
+    try {
+      const conversations = getSavedConversations();
+      const filtered = conversations.filter(c => c.id !== conversationId);
+      localStorage.setItem('multiverse-conversations', JSON.stringify(filtered));
+    } catch (e) {
+      console.warn('Failed to delete conversation:', e);
+    }
+  };
+
+  // Export conversation
+  const exportConversation = (format: 'json' | 'markdown' | 'txt' = 'json') => {
+    if (messages.length === 0) {
+      alert('No conversation to export');
+      return;
+    }
+
+    let content = '';
+    let filename = '';
+    let mimeType = '';
+
+    if (format === 'json') {
+      const conversation = {
+        title: messages[0]?.content.substring(0, 50) || 'New Conversation',
+        messages: messages,
+        model: selectedModel,
+        endpoint: customEndpoint,
+        exportedAt: new Date().toISOString()
+      };
+      content = JSON.stringify(conversation, null, 2);
+      filename = `conversation-${Date.now()}.json`;
+      mimeType = 'application/json';
+    } else if (format === 'markdown') {
+      content = `# Conversation\n\n`;
+      content += `**Model:** ${selectedModel}\n`;
+      content += `**Endpoint:** ${customEndpoint}\n`;
+      content += `**Exported:** ${new Date().toLocaleString()}\n\n`;
+      content += `---\n\n`;
+      messages.forEach((msg) => {
+        content += `## ${msg.role === 'user' ? 'You' : 'Assistant'} (${msg.timestamp.toLocaleString()})\n\n`;
+        content += `${msg.content}\n\n`;
+        content += `---\n\n`;
+      });
+      filename = `conversation-${Date.now()}.md`;
+      mimeType = 'text/markdown';
+    } else { // txt
+      content = `Conversation\n`;
+      content += `Model: ${selectedModel}\n`;
+      content += `Endpoint: ${customEndpoint}\n`;
+      content += `Exported: ${new Date().toLocaleString()}\n\n`;
+      content += `${'='.repeat(50)}\n\n`;
+      messages.forEach((msg) => {
+        content += `${msg.role.toUpperCase()}: ${msg.timestamp.toLocaleString()}\n`;
+        content += `${msg.content}\n\n`;
+        content += `${'-'.repeat(50)}\n\n`;
+      });
+      filename = `conversation-${Date.now()}.txt`;
+      mimeType = 'text/plain';
+    }
+
+    // Create download link
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Import conversation
+  const importConversation = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const data = JSON.parse(content);
+        
+        if (data.messages && Array.isArray(data.messages)) {
+          // Convert timestamps if they're strings
+          const messages = data.messages.map((msg: any) => ({
+            ...msg,
+            timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
+          }));
+          
+          setMessages(messages);
+          if (data.model) setSelectedModel(data.model);
+          if (data.endpoint) setCustomEndpoint(data.endpoint);
+          alert('Conversation imported successfully!');
+        } else {
+          alert('Invalid conversation file format');
+        }
+      } catch (err) {
+        console.error('Import error:', err);
+        alert('Failed to import conversation. Please check the file format.');
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    event.target.value = '';
   };
 
   const handleCopyCode = async () => {
@@ -2141,21 +2519,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               >
                 📊 Dashboard
               </button>
-              {/* <button 
+              <button 
                 className="control-button"
-                onClick={() => {
-                  console.log('Testing metrics collection...');
-                  console.log('Current model metrics:', simpleMetricsCollector.getModelMetrics());
-                  console.log('Current system metrics:', simpleMetricsCollector.getSystemMetrics());
-                  console.log('Current composite metrics:', simpleMetricsCollector.getCompositeMetrics());
-                  
-                  // Test recording some metrics
-                  simpleMetricsCollector.recordInference(100, 50, 2000, 500, 25, 'FP16');
-                  console.log('Recorded test inference');
-                }}
+                onClick={() => setShowConversationHistory(true)}
               >
-                📊 Test Metrics
-              </button> */}
+                💬 History
+              </button>
               <button 
                 className="clear-button"
                 onClick={handleClearChat}
@@ -2167,8 +2536,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
           <div className="chat-messages" ref={chatMessagesRef}>
             {messages.map((message: Message, index: number) => (
-              <div key={index} className={`message ${message.role}`}>
-                <div>{message.content}</div>
+              <div key={index} className={`message ${message.role}`} style={{ position: 'relative', paddingRight: '40px' }}>
+                <div 
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+                  style={{ 
+                    wordBreak: 'break-word',
+                    lineHeight: '1.5'
+                  }}
+                />
+                <button
+                  onClick={(e) => handleCopyMessage(message.content, e)}
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    right: '8px',
+                    background: 'transparent',
+                    border: '1px solid #30363d',
+                    borderRadius: '4px',
+                    color: '#c9d1d9',
+                    padding: '4px 8px',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    opacity: 0.7,
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.opacity = '1';
+                    e.currentTarget.style.borderColor = '#58a6ff';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.opacity = '0.7';
+                    e.currentTarget.style.borderColor = '#30363d';
+                  }}
+                  title="Copy message"
+                >
+                  📋
+                </button>
               </div>
             ))}
             
@@ -2178,9 +2581,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 <div className="thinking-header">
                   🤔 Thinking...
                 </div>
-                <div className="thinking-content">
-                  {thinkingContent}
-                </div>
+                <div 
+                  className="thinking-content"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(thinkingContent) }}
+                  style={{ 
+                    wordBreak: 'break-word',
+                    lineHeight: '1.5'
+                  }}
+                />
               </div>
             )}
             
@@ -2190,9 +2598,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 <div className="response-header">
                   💬 Response
                 </div>
-                <div className="response-content">
-                  {responseContent}
-                </div>
+                <div 
+                  className="response-content"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(responseContent) }}
+                  style={{ 
+                    wordBreak: 'break-word',
+                    lineHeight: '1.5'
+                  }}
+                />
               </div>
             )}
           </div>
@@ -3109,9 +3522,232 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             </div>
           </div>
         </div>
-      )}
-      </div>
-  );
-}
+              )}
 
-export default App;
+              {/* Conversation History Modal */}
+              {showConversationHistory && (
+                <div 
+                  style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0, 0, 0, 0.8)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 1000
+                  }}
+                  onClick={() => setShowConversationHistory(false)}
+                >
+                  <div 
+                    style={{
+                      background: '#161b22',
+                      border: '1px solid #30363d',
+                      borderRadius: '8px',
+                      padding: isMobile ? '15px' : '20px',
+                      maxWidth: isMobile ? '95%' : '600px',
+                      width: '90%',
+                      maxHeight: isMobile ? '90vh' : '80vh',
+                      overflow: 'auto',
+                      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)'
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                      <h2 style={{ margin: 0, color: '#c9d1d9', fontWeight: 600 }}>💬 Conversation History</h2>
+                      <button 
+                        onClick={() => setShowConversationHistory(false)}
+                        style={{
+                          background: 'transparent',
+                          color: '#f85149',
+                          border: '1px solid #f85149',
+                          padding: '8px 12px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '0.9rem',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    {/* Export/Import Buttons */}
+                    <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => exportConversation('json')}
+                        disabled={messages.length === 0}
+                        style={{
+                          background: messages.length === 0 ? '#30363d' : '#238636',
+                          color: '#fff',
+                          border: '1px solid',
+                          borderColor: messages.length === 0 ? '#30363d' : '#238636',
+                          padding: '8px 16px',
+                          borderRadius: '6px',
+                          cursor: messages.length === 0 ? 'not-allowed' : 'pointer',
+                          fontSize: '0.9rem',
+                          opacity: messages.length === 0 ? 0.5 : 1
+                        }}
+                      >
+                        📥 Export JSON
+                      </button>
+                      <button
+                        onClick={() => exportConversation('markdown')}
+                        disabled={messages.length === 0}
+                        style={{
+                          background: messages.length === 0 ? '#30363d' : '#238636',
+                          color: '#fff',
+                          border: '1px solid',
+                          borderColor: messages.length === 0 ? '#30363d' : '#238636',
+                          padding: '8px 16px',
+                          borderRadius: '6px',
+                          cursor: messages.length === 0 ? 'not-allowed' : 'pointer',
+                          fontSize: '0.9rem',
+                          opacity: messages.length === 0 ? 0.5 : 1
+                        }}
+                      >
+                        📥 Export Markdown
+                      </button>
+                      <button
+                        onClick={() => exportConversation('txt')}
+                        disabled={messages.length === 0}
+                        style={{
+                          background: messages.length === 0 ? '#30363d' : '#238636',
+                          color: '#fff',
+                          border: '1px solid',
+                          borderColor: messages.length === 0 ? '#30363d' : '#238636',
+                          padding: '8px 16px',
+                          borderRadius: '6px',
+                          cursor: messages.length === 0 ? 'not-allowed' : 'pointer',
+                          fontSize: '0.9rem',
+                          opacity: messages.length === 0 ? 0.5 : 1
+                        }}
+                      >
+                        📥 Export TXT
+                      </button>
+                      <label
+                        style={{
+                          background: '#238636',
+                          color: '#fff',
+                          border: '1px solid #238636',
+                          padding: '8px 16px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '0.9rem',
+                          display: 'inline-block'
+                        }}
+                      >
+                        📤 Import
+                        <input
+                          type="file"
+                          accept=".json"
+                          onChange={importConversation}
+                          style={{ display: 'none' }}
+                        />
+                      </label>
+                      <button
+                        onClick={saveConversationToList}
+                        disabled={messages.length === 0}
+                        style={{
+                          background: messages.length === 0 ? '#30363d' : '#58a6ff',
+                          color: '#fff',
+                          border: '1px solid',
+                          borderColor: messages.length === 0 ? '#30363d' : '#58a6ff',
+                          padding: '8px 16px',
+                          borderRadius: '6px',
+                          cursor: messages.length === 0 ? 'not-allowed' : 'pointer',
+                          fontSize: '0.9rem',
+                          opacity: messages.length === 0 ? 0.5 : 1
+                        }}
+                      >
+                        💾 Save to History
+                      </button>
+                    </div>
+
+                    {/* Saved Conversations List */}
+                    <div style={{ marginTop: '20px' }}>
+                      <h3 style={{ color: '#c9d1d9', fontWeight: 600, marginBottom: '15px' }}>Saved Conversations</h3>
+                      {getSavedConversations().length === 0 ? (
+                        <div style={{ color: '#8b949e', textAlign: 'center', padding: '20px' }}>
+                          No saved conversations yet. Save your current conversation to see it here.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          {getSavedConversations().map((conv) => (
+                            <div
+                              key={conv.id}
+                              style={{
+                                background: '#0d1117',
+                                border: '1px solid #30363d',
+                                borderRadius: '6px',
+                                padding: '12px',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                              }}
+                            >
+                              <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => loadConversationFromList(conv.id)}>
+                                <div style={{ color: '#c9d1d9', fontWeight: 600, marginBottom: '4px' }}>
+                                  {conv.title}
+                                </div>
+                                <div style={{ fontSize: '0.85rem', color: '#8b949e' }}>
+                                  {conv.messages.length} messages • {new Date(conv.createdAt).toLocaleString()}
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: '#6e7681', marginTop: '4px' }}>
+                                  {conv.model} • {conv.endpoint}
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  onClick={() => {
+                                    setMessages(conv.messages);
+                                    setSelectedModel(conv.model);
+                                    setCustomEndpoint(conv.endpoint);
+                                    setShowConversationHistory(false);
+                                  }}
+                                  style={{
+                                    background: 'transparent',
+                                    color: '#58a6ff',
+                                    border: '1px solid #58a6ff',
+                                    padding: '6px 12px',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontSize: '0.85rem'
+                                  }}
+                                >
+                                  Load
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (confirm('Delete this conversation?')) {
+                                      deleteConversation(conv.id);
+                                    }
+                                  }}
+                                  style={{
+                                    background: 'transparent',
+                                    color: '#f85149',
+                                    border: '1px solid #f85149',
+                                    padding: '6px 12px',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontSize: '0.85rem'
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+              </div>
+          );
+        }
+
+        export default App;
