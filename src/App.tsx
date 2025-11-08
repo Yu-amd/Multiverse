@@ -59,17 +59,17 @@ const HintIcon: React.FC<{ text: string }> = ({ text }) => {
         right: `${tooltipState.right}px`,
         transform: 'translateY(-100%)',
         padding: '14px 18px',
-        background: 'linear-gradient(135deg, #0d1117 0%, #161b22 100%)',
-        border: '2px solid #7ee787',
+        background: 'var(--tooltip-bg)',
+        border: '2px solid var(--tooltip-border)',
         borderRadius: '10px',
-        color: '#c9d1d9',
+        color: 'var(--tooltip-text)',
         fontSize: '0.95rem',
         lineHeight: '1.6',
         zIndex: 99999,
         minWidth: '280px',
         maxWidth: '450px',
         whiteSpace: 'normal',
-        boxShadow: '0 10px 30px rgba(126, 231, 135, 0.2), 0 4px 12px rgba(0, 0, 0, 0.6)',
+        boxShadow: `0 10px 30px var(--tooltip-shadow), 0 4px 12px rgba(0, 0, 0, 0.15)`,
         fontWeight: 400,
         pointerEvents: 'none'
       }}
@@ -92,7 +92,7 @@ const HintIcon: React.FC<{ text: string }> = ({ text }) => {
           height: 0,
           borderLeft: '8px solid transparent',
           borderRight: '8px solid transparent',
-          borderTop: '8px solid #7ee787'
+          borderTop: '8px solid var(--tooltip-border)'
         }}
       />
       <div
@@ -104,7 +104,7 @@ const HintIcon: React.FC<{ text: string }> = ({ text }) => {
           height: 0,
           borderLeft: '6px solid transparent',
           borderRight: '6px solid transparent',
-          borderTop: '6px solid #0d1117'
+          borderTop: '6px solid var(--bg-primary)'
         }}
       />
     </div>
@@ -121,8 +121,8 @@ const HintIcon: React.FC<{ text: string }> = ({ text }) => {
           width: '18px',
           height: '18px',
           borderRadius: '50%',
-          background: '#7ee787',
-          color: '#0d1117',
+          background: 'var(--tooltip-icon-bg)',
+          color: 'var(--tooltip-icon-text)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -131,7 +131,7 @@ const HintIcon: React.FC<{ text: string }> = ({ text }) => {
           cursor: 'pointer',
           zIndex: 1000,
           transition: 'all 0.2s',
-          border: '1px solid #7ee787'
+          border: '1px solid var(--tooltip-border)'
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -311,7 +311,25 @@ function App() {
   const initialSettings = loadSettings();
   const initialMessages = loadConversation();
 
+  // Load theme from localStorage
+  const loadTheme = () => {
+    try {
+      const saved = localStorage.getItem('multiverse-theme');
+      if (saved === 'light' || saved === 'dark') {
+        return saved;
+      }
+      // Check system preference
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+        return 'light';
+      }
+    } catch (e) {
+      console.warn('Failed to load theme:', e);
+    }
+    return 'dark';
+  };
+
   const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [theme, setTheme] = useState<'light' | 'dark'>(loadTheme());
   const [inputMessage, setInputMessage] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [selectedModel, setSelectedModel] = useState(initialSettings.selectedModel);
@@ -1587,6 +1605,261 @@ function App() {
   const handleClearChat = () => {
     setMessages([]);
     localStorage.removeItem('multiverse-current-conversation');
+    showToast('Chat cleared', 'info');
+  };
+
+  // Delete a specific message
+  const handleDeleteMessage = (index: number) => {
+    if (index < 0 || index >= messages.length) return;
+    
+    const newMessages = messages.filter((_, i) => i !== index);
+    setMessages(newMessages);
+    showToast('Message deleted', 'info');
+  };
+
+  // Regenerate last response
+  const handleRegenerateResponse = async () => {
+    if (messages.length < 2) {
+      showToast('No response to regenerate', 'error');
+      return;
+    }
+
+    // Find the last user message and assistant response
+    let lastUserIndex = -1;
+    let lastAssistantIndex = -1;
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant' && lastAssistantIndex === -1) {
+        lastAssistantIndex = i;
+      } else if (messages[i].role === 'user' && lastUserIndex === -1 && lastAssistantIndex !== -1) {
+        lastUserIndex = i;
+        break;
+      }
+    }
+
+    if (lastUserIndex === -1 || lastAssistantIndex === -1) {
+      showToast('No response to regenerate', 'error');
+      return;
+    }
+
+    // Remove the last assistant response
+    const messagesWithoutLastResponse = messages.slice(0, lastAssistantIndex);
+    setMessages(messagesWithoutLastResponse);
+
+    // Get the last user message
+    const lastUserMessage = messages[lastUserIndex].content;
+    
+    // Clear any ongoing response
+    setResponseContent('');
+    setThinkingContent('');
+    setIsThinking(false);
+    
+    // Use the existing handleSendMessage logic but with modified history
+    // We'll need to create a modified version that accepts message history
+    const newMessage: Message = {
+      role: 'user',
+      content: lastUserMessage,
+      timestamp: new Date(),
+    };
+    
+    // Don't add the user message again since it's already in history
+    // Just send the request with the truncated history
+    setIsLoading(true);
+    
+    const startTime = Date.now();
+    let firstTokenTime = Date.now();
+    
+    try {
+      const endpoint = customEndpoint;
+      const request = {
+        messages: [...messagesWithoutLastResponse, newMessage],
+        temperature: temperature,
+        max_tokens: maxTokens,
+        top_p: topP,
+        stream: true,
+      };
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      const response = await fetch(`${endpoint}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      let accumulatedContent = '';
+      let accumulatedThinking = '';
+      let inThinkingMode = false;
+      const decoder = new TextDecoder();
+
+      const thinkingStartMarkers = [
+        '<thinking>', '<reasoning>', '<internal>', '<think>',
+        'let me think', 'i need to', 'first, let me',
+        'step 1:', 'analysis:', 'reasoning:',
+        'processing...', 'analyzing...', 'computing...'
+      ];
+
+      const thinkingEndMarkers = [
+        '</thinking>', '</reasoning>', '</internal>', '</think>',
+        'now i can', 'based on this', 'therefore',
+        'in conclusion', 'so the answer', 'here\'s what i found'
+      ];
+
+      let chunkCount = 0;
+      let hasReceivedContent = false;
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        chunkCount++;
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.choices[0]?.delta?.content) {
+                const content = parsed.choices[0].delta.content;
+
+                if (!inThinkingMode) {
+                  const lowerContent = content.toLowerCase();
+                  const hasThinkingMarker = thinkingStartMarkers.some(marker =>
+                    lowerContent.includes(marker)
+                  );
+
+                  if (hasThinkingMarker) {
+                    inThinkingMode = true;
+                    setIsThinking(true);
+                    const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '').trim();
+                    accumulatedThinking = cleanContent;
+                    setThinkingContent(accumulatedThinking);
+                    continue;
+                  }
+                }
+
+                if (inThinkingMode) {
+                  const lowerContent = content.toLowerCase();
+                  const hasEndMarker = thinkingEndMarkers.some(marker =>
+                    lowerContent.includes(marker)
+                  );
+
+                  if (hasEndMarker) {
+                    inThinkingMode = false;
+                    setIsThinking(false);
+                    const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '').trim();
+                    accumulatedContent = cleanContent;
+                    setResponseContent(accumulatedContent);
+                    continue;
+                  }
+                }
+
+                if (inThinkingMode) {
+                  const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '');
+                  accumulatedThinking += cleanContent;
+                  setThinkingContent(accumulatedThinking);
+                  hasReceivedContent = true;
+                } else {
+                  const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '');
+                  accumulatedContent += cleanContent;
+                  setResponseContent(accumulatedContent);
+                  hasReceivedContent = true;
+                  
+                  if (!hasReceivedContent) {
+                    firstTokenTime = Date.now() - startTime;
+                  }
+                }
+              }
+            } catch (parseError) {
+              console.error('Error parsing JSON:', parseError);
+            }
+          }
+        }
+      }
+
+      const endTime = Date.now();
+      const totalTime = endTime - startTime;
+      const tokensPerSecond = accumulatedContent.length > 0 ? (accumulatedContent.length / (totalTime / 1000)) : 0;
+
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: accumulatedContent, timestamp: new Date() }
+      ]);
+      setResponseContent('');
+      setThinkingContent('');
+      setIsThinking(false);
+      setIsLoading(false);
+
+      recordMetrics(
+        lastUserMessage.length,
+        accumulatedContent.length,
+        totalTime,
+        firstTokenTime,
+        tokensPerSecond
+      );
+
+    } catch (error) {
+      console.error('Error regenerating response:', error);
+      
+      let errorMessage = 'Unknown error occurred';
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          errorMessage = 'Request timed out. Please try again.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      if (error instanceof Error && error.name === 'AbortError') {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant' as const,
+            content: 'Generation stopped by user.',
+            timestamp: new Date(),
+          } as Message,
+        ]);
+        showToast('Generation stopped', 'info');
+      } else {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant' as const,
+            content: `Error: ${errorMessage}`,
+            timestamp: new Date(),
+          } as Message,
+        ]);
+        showToast(`Error: ${errorMessage}`, 'error');
+      }
+      
+      setIsLoading(false);
+      setIsThinking(false);
+      setThinkingContent('');
+      setResponseContent('');
+      abortControllerRef.current = null;
+    }
   };
 
   // Get all saved conversations
@@ -2623,6 +2896,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
   };
 
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
   return (
     <div className="app-container">
       <div className={`content-wrapper ${isROGAllyX ? 'rog-ally-layout' : isMobile ? 'mobile-layout' : isTablet ? 'tablet-layout' : 'desktop-layout'}`}>
@@ -2664,13 +2942,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
           <div className="chat-messages" ref={chatMessagesRef}>
             {messages.map((message: Message, index: number) => (
-              <div key={index} className={`message ${message.role}`} style={{ position: 'relative', paddingRight: '40px' }}>
+              <div key={index} className={`message ${message.role}`} style={{ position: 'relative', paddingRight: '80px' }}>
                 {showTimestamps && (
                   <div style={{ 
                     fontSize: '0.75rem', 
-                    color: '#8b949e', 
+                    color: 'var(--text-secondary)', 
                     marginBottom: '4px',
-                    opacity: 0.7
+                    opacity: 0.8
                   }}>
                     {message.timestamp.toLocaleString()}
                   </div>
@@ -2682,34 +2960,91 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     lineHeight: '1.5'
                   }}
                 />
-                <button
-                  onClick={(e) => handleCopyMessage(message.content, e)}
-                  style={{
-                    position: 'absolute',
-                    top: '8px',
-                    right: '8px',
-                    background: 'transparent',
-                    border: '1px solid #30363d',
-                    borderRadius: '4px',
-                    color: '#c9d1d9',
-                    padding: '4px 8px',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    opacity: 0.7,
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.opacity = '1';
-                    e.currentTarget.style.borderColor = '#58a6ff';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.opacity = '0.7';
-                    e.currentTarget.style.borderColor = '#30363d';
-                  }}
-                  title="Copy message"
-                >
-                  📋
-                </button>
+                <div style={{ 
+                  position: 'absolute', 
+                  top: '8px', 
+                  right: '8px', 
+                  display: 'flex', 
+                  gap: '4px' 
+                }}>
+                  <button
+                    onClick={(e) => handleCopyMessage(message.content, e)}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid #30363d',
+                      borderRadius: '4px',
+                      color: '#c9d1d9',
+                      padding: '4px 8px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      opacity: 0.7,
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.opacity = '1';
+                      e.currentTarget.style.borderColor = '#58a6ff';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.opacity = '0.7';
+                      e.currentTarget.style.borderColor = '#30363d';
+                    }}
+                    title="Copy message"
+                  >
+                    📋
+                  </button>
+                  {message.role === 'assistant' && index === messages.length - 1 && (
+                    <button
+                      onClick={handleRegenerateResponse}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid #30363d',
+                        borderRadius: '4px',
+                        color: '#c9d1d9',
+                        padding: '4px 8px',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        opacity: 0.7,
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.opacity = '1';
+                        e.currentTarget.style.borderColor = '#7ee787';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.opacity = '0.7';
+                        e.currentTarget.style.borderColor = '#30363d';
+                      }}
+                      title="Regenerate response"
+                    >
+                      🔄
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDeleteMessage(index)}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid #30363d',
+                      borderRadius: '4px',
+                      color: '#c9d1d9',
+                      padding: '4px 8px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      opacity: 0.7,
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.opacity = '1';
+                      e.currentTarget.style.borderColor = '#f85149';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.opacity = '0.7';
+                      e.currentTarget.style.borderColor = '#30363d';
+                    }}
+                    title="Delete message"
+                  >
+                    🗑️
+                  </button>
+                </div>
               </div>
             ))}
             
@@ -2896,31 +3231,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       {/* Settings Modal */}
       {showSettings && (
         <div 
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0, 0, 0, 0.8)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000
-          }}
+          className="modal-overlay"
           onClick={() => setShowSettings(false)}
         >
           <div 
+            className="modal-content"
             style={{
-              background: '#161b22',
-              border: '1px solid #30363d',
-              borderRadius: '8px',
               padding: isMobile ? '15px' : '20px',
               maxWidth: isMobile ? '95%' : '500px',
               width: '90%',
-              maxHeight: isMobile ? '90vh' : '80vh',
-              overflow: 'auto',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)'
+              maxHeight: isMobile ? '90vh' : '80vh'
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -2930,31 +3250,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               alignItems: 'center',
               marginBottom: '20px'
             }}>
-              <h2 style={{ margin: 0, color: '#c9d1d9', fontWeight: 600 }}>Model Settings</h2>
+              <h2 className="modal-title">Model Settings</h2>
               <button 
+                className="modal-close"
                 onClick={() => setShowSettings(false)}
-                style={{
-                  background: 'transparent',
-                  color: '#f85149',
-                  border: '1px solid #f85149',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(248, 81, 73, 0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
               >
                 ✕ Close
               </button>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
+            <div className="form-group">
+              <label className="form-label">
                 Model Provider
               </label>
               <select
+                className="form-select"
                 value={selectedModel}
                 onChange={(e) => {
                   const newModel = e.target.value;
@@ -2966,15 +3276,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     setCustomEndpoint('http://localhost:1234');
                   }
                 }}
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  border: '1px solid #30363d',
-                  borderRadius: '6px',
-                  background: '#0d1117',
-                  color: '#c9d1d9',
-                  fontFamily: 'inherit'
-                }}
               >
                 <option value="LM Studio (Local)">LM Studio (Local)</option>
                 <option value="Ollama (Local)">Ollama (Local)</option>
@@ -2982,11 +3283,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               </select>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
+            <div className="form-group">
+              <label className="form-label">
                 Endpoint URL
               </label>
               <input
+                className="form-input"
                 type="text"
                 value={customEndpoint}
                 onChange={(e) => setCustomEndpoint(e.target.value)}
@@ -2995,91 +3297,74 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   selectedModel === 'LM Studio (Local)' ? 'http://localhost:1234' :
                   'http://localhost:1234'
                 }
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  border: '1px solid #30363d',
-                  borderRadius: '6px',
-                  background: '#0d1117',
-                  color: '#c9d1d9',
-                  fontFamily: 'inherit'
-                }}
               />
-              <div style={{ fontSize: '0.8rem', color: '#8b949e', marginTop: '4px' }}>
+              <div className="form-help">
                 {selectedModel === 'LM Studio (Local)' && 'Default: http://localhost:1234 (or your LM Studio URL/IP)'}
                 {selectedModel === 'Ollama (Local)' && 'Default: http://localhost:11434 (or your Ollama URL/IP)'}
                 {selectedModel === 'Custom Endpoint' && 'Enter your custom endpoint URL'}
               </div>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
+            <div className="form-group">
+              <label className="form-label">
                 API Key (Optional)
               </label>
               <input
+                className="form-input"
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="Enter API key if required"
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  border: '1px solid #30363d',
-                  borderRadius: '6px',
-                  background: '#0d1117',
-                  color: '#c9d1d9',
-                  fontFamily: 'inherit'
-                }}
               />
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
+            <div className="form-group">
+              <label className="form-label">
                 Temperature: {temperature}
               </label>
               <input
+                className="form-range"
                 type="range"
                 min="0"
                 max="2"
                 step="0.1"
                 value={temperature}
                 onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                style={{ width: '100%' }}
               />
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
+            <div className="form-group">
+              <label className="form-label">
                 Max Tokens: {maxTokens}
               </label>
               <input
+                className="form-range"
                 type="range"
                 min="100"
                 max="4096"
                 step="100"
                 value={maxTokens}
                 onChange={(e) => setMaxTokens(parseInt(e.target.value))}
-                style={{ width: '100%' }}
               />
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
+            <div className="form-group">
+              <label className="form-label">
                 Top P: {topP}
               </label>
               <input
+                className="form-range"
                 type="range"
                 min="0"
                 max="1"
                 step="0.1"
                 value={topP}
                 onChange={(e) => setTopP(parseFloat(e.target.value))}
-                style={{ width: '100%' }}
               />
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#c9d1d9', fontWeight: 500 }}>
+            <div className="form-group">
+              <label className="form-label">
                 Layout Settings
               </label>
               <div style={{ 
@@ -3098,21 +3383,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   }}
                   style={{ transform: 'scale(1.2)' }}
                 />
-                <label htmlFor="rog-ally-toggle" style={{ color: '#c9d1d9', cursor: 'pointer' }}>
+                <label htmlFor="rog-ally-toggle" style={{ color: 'var(--text-primary)', cursor: 'pointer' }}>
                   🎮 Force ROG Ally X Layout (Bigger Fonts)
                 </label>
               </div>
-              <div style={{ 
-                fontSize: '0.8rem', 
-                color: '#888',
-                marginTop: '5px'
-              }}>
+              <div className="form-help">
                 Current Layout: {isROGAllyX ? 'ROG Ally X' : isMobile ? 'Mobile' : isTablet ? 'Tablet' : 'Desktop'}
               </div>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', color: '#c9d1d9', cursor: 'pointer' }}>
+            <div className="form-group">
+              <label style={{ display: 'flex', alignItems: 'center', color: 'var(--text-primary)', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   id="show-timestamps"
@@ -3122,8 +3403,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 />
                 <span>🕐 Show Message Timestamps</span>
               </label>
-              <div style={{ fontSize: '0.8rem', color: '#8b949e', marginTop: '4px' }}>
+              <div className="form-help">
                 Display timestamps on all messages
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                Theme
+              </label>
+              <select
+                className="form-select"
+                value={theme}
+                onChange={(e) => {
+                  const newTheme = e.target.value as 'light' | 'dark';
+                  setTheme(newTheme);
+                  localStorage.setItem('multiverse-theme', newTheme);
+                  document.documentElement.setAttribute('data-theme', newTheme);
+                }}
+              >
+                <option value="dark">🌙 Dark Mode</option>
+                <option value="light">☀️ Light Mode</option>
+              </select>
+              <div className="form-help">
+                Choose your preferred color theme
               </div>
             </div>
           </div>
@@ -3133,72 +3436,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       {/* API Info Modal */}
       {showApiInfo && (
         <div 
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0, 0, 0, 0.8)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000
-          }}
+          className="modal-overlay"
           onClick={() => setShowApiInfo(false)}
         >
           <div 
+            className="modal-content"
             style={{
-              background: '#161b22',
-              border: '1px solid #30363d',
-              borderRadius: '8px',
               padding: isMobile ? '15px' : '20px',
               maxWidth: isMobile ? '95%' : '600px',
               width: '90%',
-              maxHeight: isMobile ? '90vh' : '80vh',
-              overflow: 'auto',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)'
+              maxHeight: isMobile ? '90vh' : '80vh'
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center',
-              marginBottom: '20px'
-            }}>
-              <h2 style={{ margin: 0, color: '#c9d1d9', fontWeight: 600 }}>API Integration Guide</h2>
+            <div className="modal-header">
+              <h2 className="modal-title">API Integration Guide</h2>
               <button 
+                className="modal-close"
                 onClick={() => setShowApiInfo(false)}
-                style={{
-                  background: 'transparent',
-                  color: '#f85149',
-                  border: '1px solid #f85149',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(248, 81, 73, 0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
               >
                 ✕ Close
-        </button>
+              </button>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#58a6ff', fontWeight: 600, marginBottom: '10px' }}>🚀 Supported Endpoints</h3>
-              <ul style={{ color: '#c9d1d9', paddingLeft: '20px' }}>
+            <div className="api-info-section">
+              <h3>🚀 Supported Endpoints</h3>
+              <ul>
                 <li><strong>LM Studio:</strong> http://localhost:1234 (default)</li>
                 <li><strong>Ollama:</strong> http://localhost:11434 (default)</li>
                 <li><strong>Custom:</strong> Any OpenAI-compatible endpoint</li>
               </ul>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#58a6ff', fontWeight: 600, marginBottom: '10px' }}>⚙️ Parameters</h3>
-              <ul style={{ color: '#c9d1d9', paddingLeft: '20px' }}>
+            <div className="api-info-section">
+              <h3>⚙️ Parameters</h3>
+              <ul>
                 <li><strong>Temperature:</strong> Controls randomness (0.0-2.0)</li>
                 <li><strong>Max Tokens:</strong> Maximum response length (100-4096)</li>
                 <li><strong>Top P:</strong> Nucleus sampling parameter (0.0-1.0)</li>
@@ -3206,9 +3478,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               </ul>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#58a6ff', fontWeight: 600, marginBottom: '10px' }}>🔧 Setup Instructions</h3>
-              <div style={{ color: '#c9d1d9', fontSize: '0.9rem' }}>
+            <div className="api-info-section">
+              <h3>🔧 Setup Instructions</h3>
+              <div style={{ fontSize: '0.9rem' }}>
                 <p><strong>LM Studio:</strong></p>
                 <ol style={{ paddingLeft: '20px', marginBottom: '15px' }}>
                   <li>Download and install LM Studio</li>
@@ -3218,16 +3490,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 
                 <p><strong>Ollama:</strong></p>
                 <ol style={{ paddingLeft: '20px', marginBottom: '15px' }}>
-                  <li>Install Ollama: <code style={{ background: '#0d1117', padding: '2px 4px', borderRadius: '3px', color: '#7ee787' }}>curl -fsSL https://ollama.ai/install.sh | sh</code></li>
-                  <li>Pull a model: <code style={{ background: '#0d1117', padding: '2px 4px', borderRadius: '3px', color: '#7ee787' }}>ollama pull llama2</code></li>
-                  <li>Start server: <code style={{ background: '#0d1117', padding: '2px 4px', borderRadius: '3px', color: '#7ee787' }}>ollama serve</code></li>
+                  <li>Install Ollama: <code>curl -fsSL https://ollama.ai/install.sh | sh</code></li>
+                  <li>Pull a model: <code>ollama pull llama2</code></li>
+                  <li>Start server: <code>ollama serve</code></li>
                 </ol>
               </div>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#58a6ff', fontWeight: 600, marginBottom: '10px' }}>💡 Features</h3>
-              <ul style={{ color: '#c9d1d9', paddingLeft: '20px' }}>
+            <div className="api-info-section">
+              <h3>💡 Features</h3>
+              <ul>
                 <li>Real-time streaming responses</li>
                 <li>Thinking vs Response detection</li>
                 <li>Interactive code generation</li>
@@ -3236,9 +3508,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               </ul>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#58a6ff', fontWeight: 600, marginBottom: '10px' }}>🐛 Troubleshooting</h3>
-              <ul style={{ color: '#c9d1d9', paddingLeft: '20px' }}>
+            <div className="api-info-section">
+              <h3>🐛 Troubleshooting</h3>
+              <ul>
                 <li>Check if your model server is running</li>
                 <li>Verify the endpoint URL is correct</li>
                 <li>Ensure the model is loaded and ready</li>
@@ -3252,111 +3524,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       {/* Dashboard Modal */}
       {showDashboard && (
         <div 
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0, 0, 0, 0.8)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000
-          }}
+          className="dashboard-modal"
           onClick={() => setShowDashboard(false)}
         >
           <div 
+            className="dashboard-content"
             style={{
-              background: '#161b22',
-              border: '1px solid #30363d',
-              borderRadius: '8px',
               padding: isMobile ? '15px' : '20px',
               maxWidth: isMobile ? '95%' : '90%',
               width: '90%',
-              maxHeight: isMobile ? '90vh' : '85vh',
-              overflow: 'auto',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)'
+              maxHeight: isMobile ? '90vh' : '85vh'
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center',
-              marginBottom: '20px'
-            }}>
-              <h2 style={{ margin: 0, color: '#c9d1d9', fontWeight: 600, fontSize: isROGAllyX ? '1.8rem' : '1.5rem' }}>📊 Performance Dashboard</h2>
+            <div className="dashboard-header">
+              <h2 className="dashboard-title" style={{ fontSize: isROGAllyX ? '1.8rem' : '1.5rem' }}>📊 Performance Dashboard</h2>
               <button 
+                className="dashboard-close"
                 onClick={() => setShowDashboard(false)}
-                style={{
-                  background: 'transparent',
-                  color: '#f85149',
-                  border: '1px solid #f85149',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(248, 81, 73, 0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
               >
                 ✕ Close
               </button>
             </div>
 
             {/* Dashboard Tabs */}
-            <div style={{ 
-              display: 'flex', 
-              gap: '10px', 
-              marginBottom: '20px',
-              flexWrap: 'wrap'
-            }}>
+            <div className="dashboard-tabs">
               <button 
+                className={`dashboard-tab ${activeDashboardTab === 'model' ? 'active' : ''}`}
                 onClick={() => setActiveDashboardTab('model')}
                 style={{
-                  background: 'transparent',
-                  color: activeDashboardTab === 'model' ? '#d2a8ff' : '#c9d1d9',
-                  border: activeDashboardTab === 'model' ? '1px solid #d2a8ff' : '1px solid #30363d',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem',
-                  fontWeight: 500,
-                  transition: 'all 0.2s'
+                  fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem'
                 }}
               >
                 🧠 Model Metrics
               </button>
               <button 
+                className={`dashboard-tab ${activeDashboardTab === 'system' ? 'active' : ''}`}
                 onClick={() => setActiveDashboardTab('system')}
                 style={{
-                  background: 'transparent',
-                  color: activeDashboardTab === 'system' ? '#d2a8ff' : '#c9d1d9',
-                  border: activeDashboardTab === 'system' ? '1px solid #d2a8ff' : '1px solid #30363d',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem',
-                  fontWeight: 500,
-                  transition: 'all 0.2s'
+                  fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem'
                 }}
               >
                 ⚙️ System Metrics
               </button>
               <button 
+                className={`dashboard-tab ${activeDashboardTab === 'composite' ? 'active' : ''}`}
                 onClick={() => setActiveDashboardTab('composite')}
                 style={{
-                  background: 'transparent',
-                  color: activeDashboardTab === 'composite' ? '#d2a8ff' : '#c9d1d9',
-                  border: activeDashboardTab === 'composite' ? '1px solid #d2a8ff' : '1px solid #30363d',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem',
-                  fontWeight: 500,
-                  transition: 'all 0.2s'
+                  fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem'
                 }}
               >
                 📊 Composite Insights
@@ -3364,87 +3579,79 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             </div>
 
             {/* Dashboard Content */}
-            <div style={{ 
-              background: '#0d1117', 
-              border: '1px solid #30363d', 
-              borderRadius: '6px', 
-              padding: '20px',
-              minHeight: '400px',
-              maxHeight: '60vh',
-              overflow: 'auto'
-            }}>
+            <div className="dashboard-panel">
               {activeDashboardTab === 'model' && (
                 <div>
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr 1fr', gap: '20px', marginBottom: '20px' }}>
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="Latency Metrics: Prompt-to-first-token = real-time measurement from API response (firstTokenTime - startTime in ms). Total response time = real-time measurement from API response (endTime - startTime in ms)" />
-                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Latency</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Latency</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
                         <div>
-                          Prompt-to-first-token: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.promptToFirstToken.toFixed(1)} ms</span>
+                          Prompt-to-first-token: <span className="value">{modelMetrics.promptToFirstToken.toFixed(1)} ms</span>
                         </div>
                         <div>
-                          Total response time: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.totalResponseTime.toFixed(1)} ms</span>
+                          Total response time: <span className="value">{modelMetrics.totalResponseTime.toFixed(1)} ms</span>
                         </div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="Token Throughput: Tokens/sec = real-time calculation from API response (responseLength / (totalTime / 1000)). Tokens in/out = real-time token counts from API request/response" />
-                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Token Throughput</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Token Throughput</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
                         <div>
-                          Tokens/sec: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.tokensPerSecond.toFixed(1)} t/s</span>
+                          Tokens/sec: <span className="value">{modelMetrics.tokensPerSecond.toFixed(1)} t/s</span>
                         </div>
                         <div>
-                          Tokens in/out: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.tokensIn} / {modelMetrics.tokensOut}</span>
+                          Tokens in/out: <span className="value">{modelMetrics.tokensIn} / {modelMetrics.tokensOut}</span>
                         </div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="Context Utilization: Prompt length = real-time input token count from API request. Max tokens = context window size from API configuration. Utilization = real-time calculation (promptLength / maxTokens) * 100%" />
-                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Context Utilization</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Context Utilization</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
                         <div>
-                          Prompt length: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.promptLength} tokens</span>
+                          Prompt length: <span className="value">{modelMetrics.promptLength} tokens</span>
                         </div>
                         <div>
-                          Max tokens: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.maxTokens} tokens</span>
+                          Max tokens: <span className="value">{modelMetrics.maxTokens} tokens</span>
                         </div>
                         <div>
-                          Utilization: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.contextUtilization.toFixed(1)}%</span>
+                          Utilization: <span className="value">{modelMetrics.contextUtilization.toFixed(1)}%</span>
                         </div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="Performance: Active requests = real-time count of concurrent API requests. Quantization = model precision format from API (FP16/INT8/INT4). Cache hit rate = real-time cache performance tracking. Errors = real-time error count from API responses" />
-                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Performance</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Performance</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
                         <div>
-                          Active requests: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.activeRequests}</span>
+                          Active requests: <span className="value">{modelMetrics.activeRequests}</span>
                         </div>
                         <div>
-                          Quantization: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.quantizationFormat}</span>
+                          Quantization: <span className="value">{modelMetrics.quantizationFormat}</span>
                         </div>
                         <div>
-                          Cache hit rate: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.cacheHitRate.toFixed(1)}%</span>
+                          Cache hit rate: <span className="value">{modelMetrics.cacheHitRate.toFixed(1)}%</span>
                         </div>
                         <div>
-                          Errors: <span style={{ color: '#f85149', fontWeight: 600 }}>{modelMetrics.errorCount}</span>
+                          Errors: <span className="error">{modelMetrics.errorCount}</span>
                         </div>
                       </div>
                     </div>
                   </div>
                   
-                  <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
-                    <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>💡 Real-time Status</h4>
-                    <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
-                      <div>Current model: <span style={{ color: '#7ee787', fontWeight: 600 }}>{selectedModel}</span></div>
-                      <div>Endpoint: <span style={{ color: '#7ee787', fontWeight: 600 }}>{customEndpoint}</span></div>
-                      <div>Temperature: <span style={{ color: '#7ee787', fontWeight: 600 }}>{temperature}</span></div>
-                      <div>Max tokens: <span style={{ color: '#7ee787', fontWeight: 600 }}>{maxTokens}</span></div>
+                  <div className="metric-card">
+                    <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>💡 Real-time Status</h4>
+                    <div className="metric-value" style={{ fontSize: '0.9rem' }}>
+                      <div>Current model: <span className="value">{selectedModel}</span></div>
+                      <div>Endpoint: <span className="value">{customEndpoint}</span></div>
+                      <div>Temperature: <span className="value">{temperature}</span></div>
+                      <div>Max tokens: <span className="value">{maxTokens}</span></div>
                     </div>
                   </div>
                 </div>
@@ -3454,150 +3661,150 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 <div>
                   {/* First row: CPU, Memory, Power & Thermal, System Status */}
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr 1fr', gap: '20px', marginBottom: '20px' }}>
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="CPU Utilization: Overall = real-time CPU usage percentage from Performance API (based on long tasks and load timing). Per-core avg = overall * 0.8. Thread count = hardware concurrency from navigator.hardwareConcurrency" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 CPU Utilization</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 CPU Utilization</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
                         <div>
-                          Overall: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.cpuUtilization.toFixed(1)}%</span>
+                          Overall: <span className="value">{systemMetrics.cpuUtilization.toFixed(1)}%</span>
                         </div>
                         <div>
-                          Per-core avg: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.cpuUtilization * 0.8).toFixed(1)}%</span>
+                          Per-core avg: <span className="value">{(systemMetrics.cpuUtilization * 0.8).toFixed(1)}%</span>
                         </div>
                         <div>
-                          Thread count: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.floor(systemMetrics.cpuUtilization / 10) + 8}</span>
+                          Thread count: <span className="value">{Math.floor(systemMetrics.cpuUtilization / 10) + 8}</span>
                         </div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="Memory: RAM usage = real-time JavaScript heap usage from Performance API (performance.memory.usedJSHeapSize) in GB. Swap activity = estimated swap usage (ramUsage * 0.1). Available = total JS heap - used heap from Performance API" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Memory</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Memory</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
                         <div>
-                          RAM usage: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.ramUsage / 1024).toFixed(1)} GB</span> <span style={{ fontSize: '0.8rem', color: '#8b949e' }}>(system RAM for LM Studio)</span>
+                          RAM usage: <span className="value">{(systemMetrics.ramUsage / 1024).toFixed(1)} GB</span> <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>(system RAM for LM Studio)</span>
                         </div>
                         <div>
-                          Swap activity: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(Math.floor(systemMetrics.ramUsage * 0.1) / 1024).toFixed(1)} GB</span>
+                          Swap activity: <span className="value">{(Math.floor(systemMetrics.ramUsage * 0.1) / 1024).toFixed(1)} GB</span>
                         </div>
                         <div>
-                          Available: <span style={{ color: '#7ee787', fontWeight: 600 }}>{((32000 - systemMetrics.ramUsage) / 1024).toFixed(1)} GB</span>
+                          Available: <span className="value">{((32000 - systemMetrics.ramUsage) / 1024).toFixed(1)} GB</span>
                         </div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="Power & Thermal: Power draw = estimated from Battery API discharge rate (calculated from battery.dischargingTime). CPU temp = estimated from CPU utilization and power draw (30 + cpuUtilization * 0.4 + powerDraw * 0.2). Throttling = detected when temp > 80°C or CPU > 95%. Battery = real-time battery level from Battery API (navigator.getBattery())" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Power & Thermal</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Power & Thermal</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
                         <div>
-                          Power draw: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.powerDraw.toFixed(1)} W</span>
+                          Power draw: <span className="value">{systemMetrics.powerDraw.toFixed(1)} W</span>
                         </div>
                         <div>
-                          CPU temp: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.temperature.toFixed(1)}°C</span>
+                          CPU temp: <span className="value">{systemMetrics.temperature.toFixed(1)}°C</span>
                         </div>
                         <div>
-                          Throttling: <span style={{ color: systemMetrics.isThrottling ? '#ff4444' : '#00ff00' }}>{systemMetrics.isThrottling ? 'Yes' : 'No'}</span>
+                          Throttling: <span className={systemMetrics.isThrottling ? 'error' : 'value'}>{systemMetrics.isThrottling ? 'Yes' : 'No'}</span>
                         </div>
                         <div>
-                          Battery: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.batteryLevel.toFixed(1)}%</span>
+                          Battery: <span className="value">{systemMetrics.batteryLevel.toFixed(1)}%</span>
                         </div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="System Status: Disk I/O = estimated from real-time RAM usage (ramUsage / 1000 MB/s). Network = estimated from power draw (powerDraw / 10 MB/s). Process PID = estimated process ID (cpuUtilization * 100 + 1000). Uptime = real-time uptime from Performance API (performance.now() / 1000 seconds)" />
-                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>💡 System Status</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
-                        <div>Disk I/O: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.ramUsage / 1000).toFixed(1)} MB/s</span></div>
-                        <div>Network: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.powerDraw / 10).toFixed(1)} MB/s</span></div>
-                        <div>Process PID: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.floor(systemMetrics.cpuUtilization * 100) + 1000}</span></div>
-                        <div>Uptime: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.floor(systemMetrics.temperature / 10)}h {Math.floor(systemMetrics.powerDraw / 10)}m</span></div>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>💡 System Status</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
+                        <div>Disk I/O: <span className="value">{(systemMetrics.ramUsage / 1000).toFixed(1)} MB/s</span></div>
+                        <div>Network: <span className="value">{(systemMetrics.powerDraw / 10).toFixed(1)} MB/s</span></div>
+                        <div>Process PID: <span className="value">{Math.floor(systemMetrics.cpuUtilization * 100) + 1000}</span></div>
+                        <div>Uptime: <span className="value">{Math.floor(systemMetrics.temperature / 10)}h {Math.floor(systemMetrics.powerDraw / 10)}m</span></div>
                       </div>
                     </div>
                   </div>
                   
                   {/* Second row: GPU Utilization, Active Accelerator, Available Accelerators */}
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '20px', marginBottom: '20px' }}>
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="GPU Utilization: Compute = real-time GPU utilization estimated from CPU activity (CPU * 1.2 when GPU active). Memory = real-time GPU memory usage estimated from system memory usage / total GPU memory in GB. Temperature = estimated from CPU temp. GPU specs detected via WebGPU API: MI300X (192 GB HBM3, 5.3 TB/s, 304 CDNA CUs), Strix Halo (RDNA 3.5, 40 CUs, 16 GB shared, ~200 GB/s)" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>
+                      <h4 className="metric-title">
                         🔹 GPU Utilization {systemMetrics.gpuModel !== 'Unknown' && (
                           <span style={{ fontSize: '0.8rem', color: systemMetrics.gpuModel === 'MI300X' ? '#00ff00' : '#7ee787' }}>
                             ({systemMetrics.gpuVendor} {systemMetrics.gpuModel})
                           </span>
                         )}
                       </h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
-                        <div>Compute: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.gpuUtilization.toFixed(1)}%</span></div>
-                        <div>Memory: <span style={{ color: '#7ee787', fontWeight: 600 }}>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
+                        <div>Compute: <span className="value">{systemMetrics.gpuUtilization.toFixed(1)}%</span></div>
+                        <div>Memory: <span className="value">
                           {systemMetrics.gpuMemoryTotal > 0 
                             ? `${(systemMetrics.gpuMemoryUsage / 1024).toFixed(1)} / ${(systemMetrics.gpuMemoryTotal / 1024).toFixed(0)} GB`
                             : `${Math.floor(systemMetrics.gpuUtilization * 80)} MB`}
                         </span></div>
-                        <div>Temperature: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.temperature.toFixed(1)}°C</span></div>
+                        <div>Temperature: <span className="value">{systemMetrics.temperature.toFixed(1)}°C</span></div>
                         {systemMetrics.gpuModel === 'MI300X' && (
                           <>
-                            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #30363d' }}>
-                              <div style={{ fontSize: '0.85rem', color: '#ffa657' }}>MI300X Specifications:</div>
-                              <div>HBM3 Memory: <span style={{ color: '#7ee787', fontWeight: 600 }}>192 GB</span></div>
-                              <div>Bandwidth: <span style={{ color: '#7ee787', fontWeight: 600 }}>5.3 TB/s</span></div>
-                              <div>Compute Units: <span style={{ color: '#7ee787', fontWeight: 600 }}>304 CDNA</span></div>
-                              <div>Clock: <span style={{ color: '#7ee787', fontWeight: 600 }}>~{systemMetrics.gpuClockSpeed} MHz</span></div>
+                            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                              <div className="metric-title" style={{ fontSize: '0.85rem' }}>MI300X Specifications:</div>
+                              <div>HBM3 Memory: <span className="value">192 GB</span></div>
+                              <div>Bandwidth: <span className="value">5.3 TB/s</span></div>
+                              <div>Compute Units: <span className="value">304 CDNA</span></div>
+                              <div>Clock: <span className="value">~{systemMetrics.gpuClockSpeed} MHz</span></div>
                             </div>
                           </>
                         )}
                         {(systemMetrics.gpuModel.includes('Strix Halo') || systemMetrics.gpuModel.includes('RDNA')) && (
                           <>
-                            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #30363d' }}>
-                              <div style={{ fontSize: '0.85rem', color: '#ffa657' }}>Strix Halo Specifications:</div>
-                              <div>Architecture: <span style={{ color: '#7ee787', fontWeight: 600 }}>RDNA 3.5</span></div>
-                              <div>Compute Units: <span style={{ color: '#7ee787', fontWeight: 600 }}>40 CUs</span></div>
-                              <div>Memory: <span style={{ color: '#7ee787', fontWeight: 600 }}>16 GB (shared)</span></div>
-                              <div>Interface: <span style={{ color: '#7ee787', fontWeight: 600 }}>256-bit LPDDR5x</span></div>
-                              <div>Bandwidth: <span style={{ color: '#7ee787', fontWeight: 600 }}>~200 GB/s</span></div>
-                              <div>Performance: <span style={{ color: '#7ee787', fontWeight: 600 }}>RTX 4060-class</span></div>
+                            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                              <div className="metric-title" style={{ fontSize: '0.85rem' }}>Strix Halo Specifications:</div>
+                              <div>Architecture: <span className="value">RDNA 3.5</span></div>
+                              <div>Compute Units: <span className="value">40 CUs</span></div>
+                              <div>Memory: <span className="value">16 GB (shared)</span></div>
+                              <div>Interface: <span className="value">256-bit LPDDR5x</span></div>
+                              <div>Bandwidth: <span className="value">~200 GB/s</span></div>
+                              <div>Performance: <span className="value">RTX 4060-class</span></div>
                             </div>
                           </>
                         )}
                         {systemMetrics.gpuComputeUnits > 0 && systemMetrics.gpuModel !== 'MI300X' && !systemMetrics.gpuModel.includes('Strix Halo') && !systemMetrics.gpuModel.includes('RDNA') && (
-                          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #30363d' }}>
-                            <div>Compute Units: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.gpuComputeUnits}</span></div>
+                          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                            <div>Compute Units: <span className="value">{systemMetrics.gpuComputeUnits}</span></div>
                           </div>
                         )}
                       </div>
                     </div>
                     
                     {/* Active Accelerator (LM Studio) */}
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>
+                    <div className="metric-card">
+                      <h4 className="metric-title">
                         ⚡ Active Accelerator (LM Studio)
                       </h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
                         <div style={{ marginBottom: '8px' }}>
-                          <div>Type: <span style={{ color: '#00ff00', fontWeight: 600, fontSize: '1rem' }}>{systemMetrics.activeAccelerator}</span></div>
-                          <div style={{ fontSize: '0.85rem', color: '#7ee787', marginTop: '4px' }}>{systemMetrics.acceleratorType}</div>
+                          <div>Type: <span className="value" style={{ fontSize: '1rem' }}>{systemMetrics.activeAccelerator}</span></div>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '4px' }}>{systemMetrics.acceleratorType}</div>
                         </div>
                         {systemMetrics.activeAccelerator === 'NPU' && systemMetrics.npuAvailable && (
-                          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #30363d' }}>
-                            <div style={{ fontSize: '0.85rem', color: '#ffa657' }}>NPU Details:</div>
-                            <div>Model: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.npuModel}</span></div>
-                            <div>Utilization: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.npuUtilization.toFixed(1)}%</span></div>
+                          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                            <div className="metric-title" style={{ fontSize: '0.85rem' }}>NPU Details:</div>
+                            <div>Model: <span className="value">{systemMetrics.npuModel}</span></div>
+                            <div>Utilization: <span className="value">{systemMetrics.npuUtilization.toFixed(1)}%</span></div>
                           </div>
                         )}
                         {systemMetrics.activeAccelerator === 'iGPU' && systemMetrics.igpuAvailable && (
-                          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #30363d' }}>
-                            <div style={{ fontSize: '0.85rem', color: '#ffa657' }}>iGPU Details:</div>
-                            <div>Model: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.igpuModel}</span></div>
-                            <div>Utilization: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.igpuUtilization.toFixed(1)}%</span></div>
+                          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                            <div className="metric-title" style={{ fontSize: '0.85rem' }}>iGPU Details:</div>
+                            <div>Model: <span className="value">{systemMetrics.igpuModel}</span></div>
+                            <div>Utilization: <span className="value">{systemMetrics.igpuUtilization.toFixed(1)}%</span></div>
                             {systemMetrics.igpuMemoryTotal > 0 && (
-                              <div>Memory: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.igpuMemoryTotal / 1024).toFixed(0)} GB</span> <span style={{ fontSize: '0.8rem', color: '#8b949e' }}>(shared GPU memory pool)</span></div>
+                              <div>Memory: <span className="value">{(systemMetrics.igpuMemoryTotal / 1024).toFixed(0)} GB</span> <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>(shared GPU memory pool)</span></div>
                             )}
                           </div>
                         )}
                         {systemMetrics.activeAccelerator === 'dGPU' && (
-                          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #30363d' }}>
-                            <div style={{ fontSize: '0.85rem', color: '#ffa657' }}>Discrete GPU:</div>
+                          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                            <div className="metric-title" style={{ fontSize: '0.85rem' }}>Discrete GPU:</div>
                             <div>{systemMetrics.gpuVendor} {systemMetrics.gpuModel}</div>
                           </div>
                         )}
@@ -3605,25 +3812,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     </div>
                     
                     {/* Available Accelerators */}
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="Available Accelerators: NPU = NPU model and utilization percentage. iGPU = iGPU model, utilization percentage, and memory in GB (shared GPU memory pool). Active accelerators are highlighted in green" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>
+                      <h4 className="metric-title">
                         🔧 Available Accelerators
                       </h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
                         {systemMetrics.npuAvailable && (
-                          <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid #30363d' }}>
-                            <div>NPU: <span style={{ color: systemMetrics.activeAccelerator === 'NPU' ? '#00ff00' : '#7ee787', fontWeight: 600 }}>
+                          <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                            <div>NPU: <span className={systemMetrics.activeAccelerator === 'NPU' ? 'value' : 'value'} style={{ color: systemMetrics.activeAccelerator === 'NPU' ? 'var(--success-color)' : 'var(--success-color)' }}>
                               {systemMetrics.npuModel}
-                            </span> {systemMetrics.activeAccelerator === 'NPU' && <span style={{ color: '#00ff00' }}>(Active)</span>}</div>
+                            </span> {systemMetrics.activeAccelerator === 'NPU' && <span className="value">(Active)</span>}</div>
                             <div style={{ fontSize: '0.85rem' }}>Utilization: {systemMetrics.npuUtilization.toFixed(1)}%</div>
                           </div>
                         )}
                         {systemMetrics.igpuAvailable && (
                           <div style={{ marginBottom: '8px' }}>
-                            <div>iGPU: <span style={{ color: systemMetrics.activeAccelerator === 'iGPU' ? '#00ff00' : '#7ee787', fontWeight: 600 }}>
+                            <div>iGPU: <span className="value" style={{ color: systemMetrics.activeAccelerator === 'iGPU' ? 'var(--success-color)' : 'var(--success-color)' }}>
                               {systemMetrics.igpuModel}
-                            </span> {systemMetrics.activeAccelerator === 'iGPU' && <span style={{ color: '#00ff00' }}>(Active)</span>}</div>
+                            </span> {systemMetrics.activeAccelerator === 'iGPU' && <span className="value">(Active)</span>}</div>
                             <div style={{ fontSize: '0.85rem' }}>Utilization: {systemMetrics.igpuUtilization.toFixed(1)}%</div>
                             {systemMetrics.igpuMemoryTotal > 0 && (
                               <div style={{ fontSize: '0.85rem' }}>Memory: {(systemMetrics.igpuMemoryTotal / 1024).toFixed(0)} GB</div>
@@ -3631,7 +3838,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                           </div>
                         )}
                         {!systemMetrics.npuAvailable && !systemMetrics.igpuAvailable && (
-                          <div style={{ fontSize: '0.85rem', color: '#8b949e', fontStyle: 'italic' }}>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
                             No additional accelerators detected
                           </div>
                         )}
@@ -3644,55 +3851,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               {activeDashboardTab === 'composite' && (
                 <div>
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr 1fr', gap: '20px', marginBottom: '20px' }}>
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="Energy Efficiency: Tokens/sec per Watt = real-time calculation from model metrics and power draw (tokensPerSecond / powerDraw). Power efficiency = real-time efficiency rating based on CPU utilization and token throughput. Battery drain rate = estimated from real-time power draw (powerDraw / 100 %/min)" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Energy Efficiency</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
-                        <div>Tokens/sec per Watt: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.tokensPerWatt.toFixed(2)} t/s/W</span></div>
-                        <div>Power efficiency: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.efficiencyRating.toFixed(1)}</span></div>
-                        <div>Battery drain rate: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.powerDraw / 100).toFixed(2)}%/min</span></div>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Energy Efficiency</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
+                        <div>Tokens/sec per Watt: <span className="value">{compositeMetrics.tokensPerWatt.toFixed(2)} t/s/W</span></div>
+                        <div>Power efficiency: <span className="value">{compositeMetrics.efficiencyRating.toFixed(1)}</span></div>
+                        <div>Battery drain rate: <span className="value">{(systemMetrics.powerDraw / 100).toFixed(2)}%/min</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="Response Quality: Response time per token = real-time calculation from API response (totalResponseTime / tokensOut). Decoding smoothness = real-time calculation from token throughput (tokensPerSecond / 2). Quality score = real-time efficiency rating based on performance metrics" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Response Quality</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
-                        <div>Response time per token: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.tokensOut > 0 ? (modelMetrics.totalResponseTime / modelMetrics.tokensOut).toFixed(1) : '0.0'} ms/token</span></div>
-                        <div>Decoding smoothness: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.min(10, Math.floor(modelMetrics.tokensPerSecond / 2))}/10</span></div>
-                        <div>Quality score: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.min(10, Math.floor(compositeMetrics.efficiencyRating))}/10</span></div>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Response Quality</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
+                        <div>Response time per token: <span className="value">{modelMetrics.tokensOut > 0 ? (modelMetrics.totalResponseTime / modelMetrics.tokensOut).toFixed(1) : '0.0'} ms/token</span></div>
+                        <div>Decoding smoothness: <span className="value">{Math.min(10, Math.floor(modelMetrics.tokensPerSecond / 2))}/10</span></div>
+                        <div>Quality score: <span className="value">{Math.min(10, Math.floor(compositeMetrics.efficiencyRating))}/10</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="Resource Balance: CPU-GPU balance = real-time ratio from Performance API CPU utilization and GPU utilization (cpuUtilization / gpuUtilization). Memory efficiency = real-time calculation from RAM usage (ramUsage / 32000 * 100%). Load distribution = real-time determination based on CPU vs GPU utilization" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Resource Balance</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
-                        <div>CPU-GPU balance: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.cpuUtilization / systemMetrics.gpuUtilization).toFixed(2)}</span></div>
-                        <div>Memory efficiency: <span style={{ color: '#7ee787', fontWeight: 600 }}>{((systemMetrics.ramUsage / 32000) * 100).toFixed(1)}%</span></div>
-                        <div>Load distribution: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.cpuUtilization > systemMetrics.gpuUtilization ? 'CPU-bound' : 'GPU-bound'}</span></div>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Resource Balance</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
+                        <div>CPU-GPU balance: <span className="value">{(systemMetrics.cpuUtilization / systemMetrics.gpuUtilization).toFixed(2)}</span></div>
+                        <div>Memory efficiency: <span className="value">{((systemMetrics.ramUsage / 32000) * 100).toFixed(1)}%</span></div>
+                        <div>Load distribution: <span className="value">{systemMetrics.cpuUtilization > systemMetrics.gpuUtilization ? 'CPU-bound' : 'GPU-bound'}</span></div>
                       </div>
                     </div>
                     
-                    <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
+                    <div className="metric-card" style={{ position: 'relative' }}>
                       <HintIcon text="Thermal Performance: Thermal efficiency = real-time calculation from temperature (10 - temperature / 10). Sustained duration = estimated from real-time temperature (60 - temperature / 2 minutes). Throttle threshold = real-time detection (70°C if throttling, 80°C otherwise). Performance curve = real-time status based on throttling detection" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Thermal Performance</h4>
-                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
-                        <div>Thermal efficiency: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.max(0, Math.floor(10 - systemMetrics.temperature / 10))}/10</span></div>
-                        <div>Sustained duration: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(60 - systemMetrics.temperature / 2).toFixed(1)} min</span></div>
-                        <div>Throttle threshold: <span style={{ color: '#f85149', fontWeight: 600 }}>{systemMetrics.isThrottling ? '70°C' : '80°C'}</span></div>
-                        <div>Performance curve: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.isThrottling ? 'Decreasing' : 'Stable'}</span></div>
+                      <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Thermal Performance</h4>
+                      <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
+                        <div>Thermal efficiency: <span className="value">{Math.max(0, Math.floor(10 - systemMetrics.temperature / 10))}/10</span></div>
+                        <div>Sustained duration: <span className="value">{(60 - systemMetrics.temperature / 2).toFixed(1)} min</span></div>
+                        <div>Throttle threshold: <span className="error">{systemMetrics.isThrottling ? '70°C' : '80°C'}</span></div>
+                        <div>Performance curve: <span className="value">{systemMetrics.isThrottling ? 'Decreasing' : 'Stable'}</span></div>
                       </div>
                     </div>
                   </div>
                   
-                  <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
-                    <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>💡 Performance Insights</h4>
-                    <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
-                      <div>Optimal settings detected: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.efficiencyRating > 7 ? 'Yes' : 'No'}</span></div>
-                      <div>Recommended adjustments: <span style={{ color: '#ffa657', fontWeight: 600 }}>{systemMetrics.isThrottling ? 'Reduce load' : 'None'}</span></div>
-                      <div>Performance trend: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.performanceTrend}</span></div>
-                      <div>Efficiency rating: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.efficiencyRating.toFixed(1)}/10</span></div>
+                  <div className="metric-card">
+                    <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>💡 Performance Insights</h4>
+                    <div className="metric-value" style={{ fontSize: '0.9rem' }}>
+                      <div>Optimal settings detected: <span className="value">{compositeMetrics.efficiencyRating > 7 ? 'Yes' : 'No'}</span></div>
+                      <div>Recommended adjustments: <span className="warning">{systemMetrics.isThrottling ? 'Reduce load' : 'None'}</span></div>
+                      <div>Performance trend: <span className="value">{compositeMetrics.performanceTrend}</span></div>
+                      <div>Efficiency rating: <span className="value">{compositeMetrics.efficiencyRating.toFixed(1)}/10</span></div>
                     </div>
                   </div>
                 </div>
@@ -3705,48 +3912,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               {/* Conversation History Modal */}
               {showConversationHistory && (
                 <div 
-                  style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    background: 'rgba(0, 0, 0, 0.8)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    zIndex: 1000
-                  }}
+                  className="modal-overlay"
                   onClick={() => setShowConversationHistory(false)}
                 >
                   <div 
+                    className="modal-content"
                     style={{
-                      background: '#161b22',
-                      border: '1px solid #30363d',
-                      borderRadius: '8px',
                       padding: isMobile ? '15px' : '20px',
                       maxWidth: isMobile ? '95%' : '600px',
                       width: '90%',
-                      maxHeight: isMobile ? '90vh' : '80vh',
-                      overflow: 'auto',
-                      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)'
+                      maxHeight: isMobile ? '90vh' : '80vh'
                     }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                      <h2 style={{ margin: 0, color: '#c9d1d9', fontWeight: 600 }}>💬 Conversation History</h2>
+                    <div className="modal-header">
+                      <h2 className="modal-title">💬 Conversation History</h2>
                       <button 
+                        className="modal-close"
                         onClick={() => setShowConversationHistory(false)}
-                        style={{
-                          background: 'transparent',
-                          color: '#f85149',
-                          border: '1px solid #f85149',
-                          padding: '8px 12px',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '0.9rem',
-                          transition: 'all 0.2s'
-                        }}
                       >
                         Close
                       </button>
@@ -3758,10 +3941,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         onClick={() => exportConversation('json')}
                         disabled={messages.length === 0}
                         style={{
-                          background: messages.length === 0 ? '#30363d' : '#238636',
+                          background: messages.length === 0 ? 'var(--button-bg)' : 'var(--success-color)',
                           color: '#fff',
                           border: '1px solid',
-                          borderColor: messages.length === 0 ? '#30363d' : '#238636',
+                          borderColor: messages.length === 0 ? 'var(--border-color)' : 'var(--success-color)',
                           padding: '8px 16px',
                           borderRadius: '6px',
                           cursor: messages.length === 0 ? 'not-allowed' : 'pointer',
@@ -3775,10 +3958,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         onClick={() => exportConversation('markdown')}
                         disabled={messages.length === 0}
                         style={{
-                          background: messages.length === 0 ? '#30363d' : '#238636',
+                          background: messages.length === 0 ? 'var(--button-bg)' : 'var(--success-color)',
                           color: '#fff',
                           border: '1px solid',
-                          borderColor: messages.length === 0 ? '#30363d' : '#238636',
+                          borderColor: messages.length === 0 ? 'var(--border-color)' : 'var(--success-color)',
                           padding: '8px 16px',
                           borderRadius: '6px',
                           cursor: messages.length === 0 ? 'not-allowed' : 'pointer',
@@ -3792,10 +3975,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         onClick={() => exportConversation('txt')}
                         disabled={messages.length === 0}
                         style={{
-                          background: messages.length === 0 ? '#30363d' : '#238636',
+                          background: messages.length === 0 ? 'var(--button-bg)' : 'var(--success-color)',
                           color: '#fff',
                           border: '1px solid',
-                          borderColor: messages.length === 0 ? '#30363d' : '#238636',
+                          borderColor: messages.length === 0 ? 'var(--border-color)' : 'var(--success-color)',
                           padding: '8px 16px',
                           borderRadius: '6px',
                           cursor: messages.length === 0 ? 'not-allowed' : 'pointer',
@@ -3807,9 +3990,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                       </button>
                       <label
                         style={{
-                          background: '#238636',
+                          background: 'var(--success-color)',
                           color: '#fff',
-                          border: '1px solid #238636',
+                          border: '1px solid var(--success-color)',
                           padding: '8px 16px',
                           borderRadius: '6px',
                           cursor: 'pointer',
@@ -3829,10 +4012,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         onClick={saveConversationToList}
                         disabled={messages.length === 0}
                         style={{
-                          background: messages.length === 0 ? '#30363d' : '#58a6ff',
+                          background: messages.length === 0 ? 'var(--button-bg)' : 'var(--accent-color)',
                           color: '#fff',
                           border: '1px solid',
-                          borderColor: messages.length === 0 ? '#30363d' : '#58a6ff',
+                          borderColor: messages.length === 0 ? 'var(--border-color)' : 'var(--accent-color)',
                           padding: '8px 16px',
                           borderRadius: '6px',
                           cursor: messages.length === 0 ? 'not-allowed' : 'pointer',
@@ -3846,9 +4029,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     {/* Saved Conversations List */}
                     <div style={{ marginTop: '20px' }}>
-                      <h3 style={{ color: '#c9d1d9', fontWeight: 600, marginBottom: '15px' }}>Saved Conversations</h3>
+                      <h3 style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: '15px' }}>Saved Conversations</h3>
                       {getSavedConversations().length === 0 ? (
-                        <div style={{ color: '#8b949e', textAlign: 'center', padding: '20px' }}>
+                        <div style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '20px' }}>
                           No saved conversations yet. Save your current conversation to see it here.
                         </div>
                       ) : (
@@ -3857,8 +4040,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             <div
                               key={conv.id}
                               style={{
-                                background: '#0d1117',
-                                border: '1px solid #30363d',
+                                background: 'var(--metric-bg)',
+                                border: '1px solid var(--border-color)',
                                 borderRadius: '6px',
                                 padding: '12px',
                                 display: 'flex',
@@ -3867,13 +4050,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                               }}
                             >
                               <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => loadConversationFromList(conv.id)}>
-                                <div style={{ color: '#c9d1d9', fontWeight: 600, marginBottom: '4px' }}>
+                                <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: '4px' }}>
                                   {conv.title}
                                 </div>
-                                <div style={{ fontSize: '0.85rem', color: '#8b949e' }}>
+                                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                                   {conv.messages.length} messages • {new Date(conv.createdAt).toLocaleString()}
                                 </div>
-                                <div style={{ fontSize: '0.75rem', color: '#6e7681', marginTop: '4px' }}>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
                                   {conv.model} • {conv.endpoint}
                                 </div>
                               </div>
@@ -3887,8 +4070,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                   }}
                                   style={{
                                     background: 'transparent',
-                                    color: '#58a6ff',
-                                    border: '1px solid #58a6ff',
+                                    color: 'var(--accent-color)',
+                                    border: '1px solid var(--accent-color)',
                                     padding: '6px 12px',
                                     borderRadius: '4px',
                                     cursor: 'pointer',
@@ -3905,8 +4088,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                   }}
                                   style={{
                                     background: 'transparent',
-                                    color: '#f85149',
-                                    border: '1px solid #f85149',
+                                    color: 'var(--error-color)',
+                                    border: '1px solid var(--error-color)',
                                     padding: '6px 12px',
                                     borderRadius: '4px',
                                     cursor: 'pointer',
