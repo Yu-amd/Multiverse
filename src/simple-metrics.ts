@@ -23,6 +23,12 @@ export interface SimpleSystemMetrics {
   gpuUtilization: number;
   gpuMemoryUsage: number;
   gpuTemperature: number;
+  gpuModel: string;
+  gpuVendor: string;
+  gpuMemoryTotal: number;
+  gpuMemoryBandwidth: number;
+  gpuComputeUnits: number;
+  gpuClockSpeed: number;
   ramUsage: number;
   swapActivity: number;
   availableMemory: number;
@@ -96,6 +102,12 @@ export class SimpleMetricsCollector {
       gpuUtilization: 0,
       gpuMemoryUsage: 0,
       gpuTemperature: 0,
+      gpuModel: 'Unknown',
+      gpuVendor: 'Unknown',
+      gpuMemoryTotal: 0,
+      gpuMemoryBandwidth: 0,
+      gpuComputeUnits: 0,
+      gpuClockSpeed: 0,
       ramUsage: 0,
       swapActivity: 0,
       availableMemory: 0,
@@ -156,13 +168,21 @@ export class SimpleMetricsCollector {
   private collectSystemMetrics(): void {
     console.log('Collecting system metrics...');
     // Simulate system metrics with more realistic values
+    const detectedGpu = this.detectGPU();
+    
     this.systemMetrics = {
       cpuUtilization: Math.random() * 100,
       cpuPerCore: Array.from({ length: navigator.hardwareConcurrency || 4 }, () => Math.random() * 100),
       threadCount: Math.floor(Math.random() * 20) + 10,
       gpuUtilization: Math.random() * 100,
-      gpuMemoryUsage: Math.random() * 8000,
+      gpuMemoryUsage: Math.random() * (detectedGpu.memoryTotal || 8000),
       gpuTemperature: 30 + Math.random() * 40,
+      gpuModel: detectedGpu.model,
+      gpuVendor: detectedGpu.vendor,
+      gpuMemoryTotal: detectedGpu.memoryTotal,
+      gpuMemoryBandwidth: detectedGpu.memoryBandwidth,
+      gpuComputeUnits: detectedGpu.computeUnits,
+      gpuClockSpeed: detectedGpu.clockSpeed,
       ramUsage: Math.random() * 16000,
       swapActivity: Math.random() * 1000,
       availableMemory: Math.random() * 8000,
@@ -303,6 +323,31 @@ export class SimpleMetricsCollector {
 
   getCompositeMetrics(): SimpleCompositeMetrics {
     return { ...this.compositeMetrics };
+  }
+
+  // Detect GPU type and characteristics
+  private detectGPU(): { model: string; vendor: string; memoryTotal: number; memoryBandwidth: number; computeUnits: number; clockSpeed: number } {
+    // Simulate MI300X detection (30% chance in simulation)
+    if (Math.random() < 0.3) {
+      return {
+        model: 'MI300X',
+        vendor: 'AMD',
+        memoryTotal: 192 * 1024, // 192 GB HBM3
+        memoryBandwidth: 5300, // 5.3 TB/s
+        computeUnits: 304,
+        clockSpeed: 1700
+      };
+    }
+    
+    const gpus = [
+      { model: 'A100', vendor: 'NVIDIA', memoryTotal: 80 * 1024, memoryBandwidth: 2039, computeUnits: 0, clockSpeed: 1410 },
+      { model: 'H100', vendor: 'NVIDIA', memoryTotal: 80 * 1024, memoryBandwidth: 3000, computeUnits: 0, clockSpeed: 1830 },
+      { model: 'RTX 4090', vendor: 'NVIDIA', memoryTotal: 24 * 1024, memoryBandwidth: 1008, computeUnits: 0, clockSpeed: 2520 },
+      { model: 'MI250X', vendor: 'AMD', memoryTotal: 128 * 1024, memoryBandwidth: 3277, computeUnits: 220, clockSpeed: 1700 },
+      { model: 'Unknown', vendor: 'Unknown', memoryTotal: 8 * 1024, memoryBandwidth: 500, computeUnits: 0, clockSpeed: 1000 }
+    ];
+    
+    return gpus[Math.floor(Math.random() * gpus.length)];
   }
 }
 

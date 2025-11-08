@@ -22,6 +22,9 @@ export interface BasicSystemMetrics {
   powerDraw: number;
   temperature: number;
   isThrottling: boolean;
+  gpuModel: string;
+  gpuVendor: string;
+  gpuMemoryTotal: number;
 }
 
 export interface BasicCompositeMetrics {
@@ -57,7 +60,10 @@ export class BasicMetricsCollector {
       ramUsage: 0,
       powerDraw: 0,
       temperature: 0,
-      isThrottling: false
+      isThrottling: false,
+      gpuModel: 'Unknown',
+      gpuVendor: 'Unknown',
+      gpuMemoryTotal: 0
     };
 
     this.compositeMetrics = {
@@ -96,15 +102,41 @@ export class BasicMetricsCollector {
 
   getSystemMetrics(): BasicSystemMetrics {
     // Simulate basic system metrics
+    const detectedGpu = this.detectGPU();
+    
     this.systemMetrics = {
       cpuUtilization: Math.random() * 100,
       gpuUtilization: Math.random() * 100,
       ramUsage: Math.random() * 16000,
       powerDraw: 20 + Math.random() * 100,
       temperature: 40 + Math.random() * 30,
-      isThrottling: Math.random() > 0.9
+      isThrottling: Math.random() > 0.9,
+      gpuModel: detectedGpu.model,
+      gpuVendor: detectedGpu.vendor,
+      gpuMemoryTotal: detectedGpu.memoryTotal
     };
     return { ...this.systemMetrics };
+  }
+
+  // Detect GPU type and characteristics
+  private detectGPU(): { model: string; vendor: string; memoryTotal: number } {
+    if (Math.random() < 0.3) {
+      return {
+        model: 'MI300X',
+        vendor: 'AMD',
+        memoryTotal: 192 * 1024 // 192 GB HBM3
+      };
+    }
+    
+    const gpus = [
+      { model: 'A100', vendor: 'NVIDIA', memoryTotal: 80 * 1024 },
+      { model: 'H100', vendor: 'NVIDIA', memoryTotal: 80 * 1024 },
+      { model: 'RTX 4090', vendor: 'NVIDIA', memoryTotal: 24 * 1024 },
+      { model: 'MI250X', vendor: 'AMD', memoryTotal: 128 * 1024 },
+      { model: 'Unknown', vendor: 'Unknown', memoryTotal: 8 * 1024 }
+    ];
+    
+    return gpus[Math.floor(Math.random() * gpus.length)];
   }
 
   getCompositeMetrics(): BasicCompositeMetrics {

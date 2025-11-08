@@ -17,6 +17,7 @@ A simplified, responsive AI model playground for testing different AI models acr
 - **Interactive Chat**: Multi-turn conversations with context preservation
 - **Code Generation**: Auto-generates Python integration code
 - **Parameter Control**: Temperature, max tokens, top-p, and API key configuration
+- **GPU Support**: Comprehensive GPU monitoring and optimization, including **AMD MI300X** support
 
 ## Quick Start
 
@@ -83,6 +84,58 @@ All endpoints are OpenAI API compatible and support streaming.
 - **Tablet**: Optimized two-column layout
 - **Mobile/Handheld**: Single-column layout (perfect for ROG Ally X)
 
+## GPU Support
+
+Multiverse includes comprehensive GPU monitoring and optimization support:
+
+### AMD MI300X Support
+
+The project now includes full support for **AMD Instinct™ MI300X** accelerators:
+
+- **Automatic Detection**: Detects MI300X GPUs using ROCm (rocm-smi)
+- **MI300X-Specific Metrics**:
+  - 192 GB HBM3 memory monitoring
+  - 5.3 TB/s memory bandwidth tracking
+  - 304 CDNA compute units utilization
+  - Real-time temperature and power monitoring
+- **Optimization Recommendations**: MI300X-specific performance tuning suggestions
+- **ROCm Integration**: Uses rocm-smi for accurate GPU metrics
+
+#### MI300X Specifications Tracked:
+- **Memory**: 192 GB HBM3 with 5.3 TB/s bandwidth
+- **Compute**: 304 AMD CDNA™ GPU Compute Units
+- **Performance**: Up to 81.7 TFLOPS (FP64) / 163.4 TFLOPS (FP32)
+
+#### Using MI300X Detection:
+
+1. **Install ROCm** (if not already installed):
+   ```bash
+   # Follow AMD ROCm installation guide for your system
+   # https://rocm.docs.amd.com/
+   ```
+
+2. **Run GPU Detection Script**:
+   ```bash
+   python3 scripts/detect-mi300x.py
+   ```
+
+3. **View GPU Metrics**: The dashboard automatically displays MI300X-specific information when detected
+
+### Other GPU Support
+
+Multiverse also supports:
+- **NVIDIA GPUs**: A100, H100, RTX series (via nvidia-smi)
+- **AMD GPUs**: MI250X, MI210, and other ROCm-compatible GPUs
+- **Generic GPUs**: Basic metrics for any detected GPU
+
+### GPU Metrics Dashboard
+
+The system metrics dashboard shows:
+- GPU utilization and memory usage
+- Temperature and power consumption
+- GPU-specific optimizations and recommendations
+- Real-time performance insights
+
 ## Generated Code
 
 The app generates clean, production-ready Python code with:
@@ -120,8 +173,13 @@ npm run test:report
 ```
 Multiverse/
 ├── src/              # React app source
+│   ├── metrics.ts    # Full metrics collection (includes MI300X support)
+│   ├── simple-metrics.ts  # Simplified metrics
+│   └── basic-metrics.ts   # Basic metrics
 ├── tests/            # Playwright tests
-├── scripts/          # Helper scripts (mock server)
+├── scripts/          # Helper scripts
+│   ├── mock-llm-server.js  # Mock LLM server
+│   └── detect-mi300x.py    # MI300X GPU detection script
 ├── .github/          # CI/CD workflows
 ```
 
