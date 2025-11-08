@@ -145,12 +145,19 @@ const HintIcon: React.FC<{ text: string }> = ({ text }) => {
 
 // Toast component
 const Toast: React.FC<{ message: string; type: 'success' | 'error' | 'info'; onClose: () => void }> = ({ message, type, onClose }) => {
+  const onCloseRef = useRef(onClose);
+  
+  // Update ref when onClose changes
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  
   useEffect(() => {
     const timer = setTimeout(() => {
-      onClose();
-    }, 3000);
+      onCloseRef.current();
+    }, 4000); // Auto-dismiss after 4 seconds (middle of 3-5 range)
     return () => clearTimeout(timer);
-  }, [onClose]);
+  }, []); // Empty dependency array - only run once on mount
 
   const colors = {
     success: { bg: '#238636', border: '#2ea043' },
