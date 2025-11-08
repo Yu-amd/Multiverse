@@ -143,6 +143,86 @@ const HintIcon: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
+// Toast component
+const Toast: React.FC<{ message: string; type: 'success' | 'error' | 'info'; onClose: () => void }> = ({ message, type, onClose }) => {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onClose();
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  const colors = {
+    success: { bg: '#238636', border: '#2ea043' },
+    error: { bg: '#da3633', border: '#f85149' },
+    info: { bg: '#1f6feb', border: '#58a6ff' }
+  };
+
+  const icons = {
+    success: '✓',
+    error: '✕',
+    info: 'ℹ'
+  };
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        background: colors[type].bg,
+        border: `1px solid ${colors[type].border}`,
+        borderRadius: '6px',
+        padding: '12px 16px',
+        color: '#fff',
+        fontSize: '0.9rem',
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        minWidth: '200px',
+        maxWidth: '400px',
+        animation: 'slideIn 0.3s ease-out',
+        marginBottom: '10px'
+      }}
+    >
+      <span style={{ fontSize: '1.2rem' }}>{icons[type]}</span>
+      <span style={{ flex: 1 }}>{message}</span>
+      <button
+        onClick={onClose}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: '#fff',
+          cursor: 'pointer',
+          fontSize: '1.2rem',
+          padding: '0',
+          lineHeight: '1'
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+};
+
+// Toast container component
+const ToastContainer: React.FC<{ toasts: Array<{ id: string; message: string; type: 'success' | 'error' | 'info' }>; onClose: (id: string) => void }> = ({ toasts, onClose }) => {
+  if (toasts.length === 0) return null;
+  
+  return (
+    <div className="toast-container">
+      {toasts.map((toast) => (
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          type={toast.type}
+          onClose={() => onClose(toast.id)}
+        />
+      ))}
+    </div>
+  );
+};
+
+
 // Simple markdown renderer for chat messages
 const renderMarkdown = (text: string): string => {
   // Escape HTML first
@@ -244,6 +324,32 @@ function App() {
   const [isThinking, setIsThinking] = useState(false);
   const [thinkingContent, setThinkingContent] = useState('');
   const [responseContent, setResponseContent] = useState('');
+  const [showTimestamps, setShowTimestamps] = useState(false);
+  const [toasts, setToasts] = useState<Array<{ id: string; message: string; type: 'success' | 'error' | 'info' }>>([]);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Toast helper functions
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Date.now().toString() + Math.random().toString();
+    setToasts(prev => [...prev, { id, message, type }]);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  // Stop generation handler
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsLoading(false);
+      setIsThinking(false);
+      setThinkingContent('');
+      setResponseContent('');
+      showToast('Generation stopped', 'info');
+    }
+  };
   const [showApiInfo, setShowApiInfo] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [showConversationHistory, setShowConversationHistory] = useState(false);
@@ -1233,6 +1339,7 @@ function App() {
 
       // Add timeout to prevent hanging requests
       const controller = new AbortController();
+      abortControllerRef.current = controller; // Store for stop button
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
       const response = await fetch(`${endpoint}/v1/chat/completions`, {
@@ -1414,14 +1521,28 @@ function App() {
         }
       }
       
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'assistant' as const,
-          content: `Error: ${errorMessage}`,
-          timestamp: new Date(),
-        } as Message,
-      ]);
+      // Check if error was due to abort
+      if (error instanceof Error && error.name === 'AbortError') {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant' as const,
+            content: 'Generation stopped by user.',
+            timestamp: new Date(),
+          } as Message,
+        ]);
+        showToast('Generation stopped', 'info');
+      } else {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant' as const,
+            content: `Error: ${errorMessage}`,
+            timestamp: new Date(),
+          } as Message,
+        ]);
+        showToast(`Error: ${errorMessage}`, 'error');
+      }
       
       // Record error metrics
       recordError();
@@ -1430,6 +1551,7 @@ function App() {
       setIsThinking(false);
       setThinkingContent('');
       setResponseContent('');
+      abortControllerRef.current = null; // Clear abort controller
     }
   };
 
@@ -1445,7 +1567,7 @@ function App() {
   const handleCopyMessage = async (content: string, event?: React.MouseEvent<HTMLButtonElement>) => {
     try {
       await navigator.clipboard.writeText(content);
-      // Show brief feedback (could be improved with a toast)
+      // Show brief feedback on button
       if (event?.currentTarget) {
         const button = event.currentTarget;
         const originalText = button.textContent;
@@ -1454,9 +1576,11 @@ function App() {
           button.textContent = originalText;
         }, 2000);
       }
+      // Show toast notification
+      showToast('Message copied to clipboard', 'success');
     } catch (err) {
       console.error('Failed to copy message:', err);
-      alert('Failed to copy to clipboard');
+      showToast('Failed to copy to clipboard', 'error');
     }
   };
 
@@ -1497,8 +1621,10 @@ function App() {
       // Keep only last 50 conversations
       const limited = conversations.slice(0, 50);
       localStorage.setItem('multiverse-conversations', JSON.stringify(limited));
+      showToast('Conversation saved to history', 'success');
     } catch (e) {
       console.warn('Failed to save conversation:', e);
+      showToast('Failed to save conversation', 'error');
     }
   };
 
@@ -1532,7 +1658,7 @@ function App() {
   // Export conversation
   const exportConversation = (format: 'json' | 'markdown' | 'txt' = 'json') => {
     if (messages.length === 0) {
-      alert('No conversation to export');
+      showToast('No conversation to export', 'error');
       return;
     }
 
@@ -1589,6 +1715,7 @@ function App() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    showToast(`Conversation exported as ${format.toUpperCase()}`, 'success');
   };
 
   // Import conversation
@@ -1612,13 +1739,13 @@ function App() {
           setMessages(messages);
           if (data.model) setSelectedModel(data.model);
           if (data.endpoint) setCustomEndpoint(data.endpoint);
-          alert('Conversation imported successfully!');
+          showToast('Conversation imported successfully!', 'success');
         } else {
-          alert('Invalid conversation file format');
+          showToast('Invalid conversation file format', 'error');
         }
       } catch (err) {
         console.error('Import error:', err);
-        alert('Failed to import conversation. Please check the file format.');
+        showToast('Failed to import conversation. Please check the file format.', 'error');
       }
     };
     reader.readAsText(file);
@@ -1629,9 +1756,10 @@ function App() {
   const handleCopyCode = async () => {
     try {
       await navigator.clipboard.writeText(getCurrentCode());
-      alert('Code copied to clipboard!');
+      showToast('Code copied to clipboard!', 'success');
     } catch (err) {
       console.error('Failed to copy code:', err);
+      showToast('Failed to copy code', 'error');
     }
   };
 
@@ -2537,6 +2665,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           <div className="chat-messages" ref={chatMessagesRef}>
             {messages.map((message: Message, index: number) => (
               <div key={index} className={`message ${message.role}`} style={{ position: 'relative', paddingRight: '40px' }}>
+                {showTimestamps && (
+                  <div style={{ 
+                    fontSize: '0.75rem', 
+                    color: '#8b949e', 
+                    marginBottom: '4px',
+                    opacity: 0.7
+                  }}>
+                    {message.timestamp.toLocaleString()}
+                  </div>
+                )}
                 <div 
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
                   style={{ 
@@ -2628,32 +2766,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   resize: 'none'
                 }}
               />
-              <button 
-                className="send-button"
-                onClick={handleSendMessage} 
-                disabled={!inputMessage.trim() || isLoading}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '0',
-                  background: isLoading ? 'transparent' : 'transparent',
-                  border: isLoading ? '1px solid #30363d' : '1px solid #d2a8ff',
-                  cursor: (!inputMessage.trim() || isLoading) ? 'not-allowed' : 'pointer',
-                  opacity: (!inputMessage.trim() || isLoading) ? 0.5 : 1,
-                  width: isROGAllyX ? '60px' : '44px',
-                  height: isROGAllyX ? '60px' : '44px',
-                  minWidth: isROGAllyX ? '60px' : '44px',
-                  minHeight: isROGAllyX ? '60px' : '44px',
-                  borderRadius: '6px',
-                  overflow: 'hidden',
-                  flexShrink: 0,
-                  alignSelf: 'flex-end'
-                }}
-              >
-                {isLoading ? (
-                  <span style={{ fontSize: isROGAllyX ? '1.2rem' : '1rem' }}>⏳</span>
-                ) : (
+              {isLoading ? (
+                <button 
+                  className="stop-button"
+                  onClick={handleStopGeneration}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0',
+                    background: 'transparent',
+                    border: '1px solid #f85149',
+                    cursor: 'pointer',
+                    width: isROGAllyX ? '60px' : '44px',
+                    height: isROGAllyX ? '60px' : '44px',
+                    minWidth: isROGAllyX ? '60px' : '44px',
+                    minHeight: isROGAllyX ? '60px' : '44px',
+                    borderRadius: '6px',
+                    flexShrink: 0,
+                    alignSelf: 'flex-end',
+                    color: '#f85149',
+                    fontSize: isROGAllyX ? '1.2rem' : '1rem'
+                  }}
+                  title="Stop generation"
+                >
+                  ⏹️
+                </button>
+              ) : (
+                <button 
+                  className="send-button"
+                  onClick={handleSendMessage} 
+                  disabled={!inputMessage.trim()}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0',
+                    background: 'transparent',
+                    border: '1px solid #d2a8ff',
+                    cursor: !inputMessage.trim() ? 'not-allowed' : 'pointer',
+                    opacity: !inputMessage.trim() ? 0.5 : 1,
+                    width: isROGAllyX ? '60px' : '44px',
+                    height: isROGAllyX ? '60px' : '44px',
+                    minWidth: isROGAllyX ? '60px' : '44px',
+                    minHeight: isROGAllyX ? '60px' : '44px',
+                    borderRadius: '6px',
+                    overflow: 'hidden',
+                    flexShrink: 0,
+                    alignSelf: 'flex-end'
+                  }}
+                >
                   <img 
                     src="/multiverse_icon.png" 
                     alt="Multiverse" 
@@ -2669,8 +2831,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                       (e.target as HTMLImageElement).parentElement!.textContent = '✈️';
                     }}
                   />
-                )}
-              </button>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -2946,6 +3108,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 marginTop: '5px'
               }}>
                 Current Layout: {isROGAllyX ? 'ROG Ally X' : isMobile ? 'Mobile' : isTablet ? 'Tablet' : 'Desktop'}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', color: '#c9d1d9', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  id="show-timestamps"
+                  checked={showTimestamps}
+                  onChange={(e) => setShowTimestamps(e.target.checked)}
+                  style={{ marginRight: '10px', transform: 'scale(1.2)' }}
+                />
+                <span>🕐 Show Message Timestamps</span>
+              </label>
+              <div style={{ fontSize: '0.8rem', color: '#8b949e', marginTop: '4px' }}>
+                Display timestamps on all messages
               </div>
             </div>
           </div>
@@ -3746,6 +3924,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   </div>
                 </div>
               )}
+
+              {/* Toast Container */}
+              <ToastContainer toasts={toasts} onClose={removeToast} />
               </div>
           );
         }
