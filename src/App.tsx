@@ -4,9 +4,12 @@ import './App.css';
 // import { basicMetricsCollector, BasicModelMetrics, BasicSystemMetrics, BasicCompositeMetrics } from './basic-metrics';
 
 interface Message {
+  id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  edited?: boolean;
+  originalContent?: string;
 }
 
 
@@ -302,12 +305,19 @@ function App() {
   };
 
   // Load conversation from localStorage on mount
-  const loadConversation = () => {
+  const loadConversation = (): Message[] => {
     try {
       const saved = localStorage.getItem('multiverse-current-conversation');
       if (saved) {
         const conversation = JSON.parse(saved);
-        return conversation.messages || [];
+        const loadedMessages = conversation.messages || [];
+        // Ensure all messages have IDs and edited flags
+        return loadedMessages.map((msg: any) => ({
+          ...msg,
+          id: msg.id || Date.now().toString() + Math.random().toString(36).substr(2, 9),
+          edited: msg.edited || false,
+          timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+        }));
       }
     } catch (e) {
       console.warn('Failed to load conversation:', e);
@@ -352,6 +362,10 @@ function App() {
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [toasts, setToasts] = useState<Array<{ id: string; message: string; type: 'success' | 'error' | 'info' }>>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState<string>('');
+  const [lastError, setLastError] = useState<{ messageId: string; userMessage: Message; error: Error } | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'online' | 'offline' | 'checking'>('online');
 
   // Toast helper functions
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -362,6 +376,99 @@ function App() {
   const removeToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
+
+  // Get user-friendly error message
+  const getFriendlyErrorMessage = (error: unknown): string => {
+    if (error instanceof Error) {
+      const errorMessage = error.message.toLowerCase();
+      
+      // Network errors
+      if (error.name === 'TypeError' && errorMessage.includes('fetch')) {
+        return 'Network error: Unable to connect to the server. Please check your connection and endpoint URL.';
+      }
+      if (error.name === 'AbortError') {
+        return 'Request was cancelled or timed out.';
+      }
+      
+      // HTTP errors
+      if (errorMessage.includes('404')) {
+        return 'Endpoint not found. Please check your endpoint URL.';
+      }
+      if (errorMessage.includes('401') || errorMessage.includes('403')) {
+        return 'Authentication failed. Please check your API key.';
+      }
+      if (errorMessage.includes('429')) {
+        return 'Rate limit exceeded. Please wait a moment and try again.';
+      }
+      if (errorMessage.includes('500') || errorMessage.includes('502') || errorMessage.includes('503')) {
+        return 'Server error. The service may be temporarily unavailable. Please try again later.';
+      }
+      
+      // CORS errors
+      if (errorMessage.includes('cors')) {
+        return 'CORS error: The server may not allow requests from this origin.';
+      }
+      
+      // Generic error
+      return `Error: ${error.message}`;
+    }
+    return 'An unexpected error occurred. Please try again.';
+  };
+
+  // Check connection status
+  useEffect(() => {
+    const checkConnection = async () => {
+      try {
+        setConnectionStatus('checking');
+        // Try to ping the endpoint with a simple request
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        try {
+          await fetch(`${customEndpoint}/v1/models`, { 
+            method: 'GET',
+            signal: controller.signal,
+            headers: {
+              ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
+            }
+          });
+          clearTimeout(timeoutId);
+          // If we get any response (even 404), we're connected
+          setConnectionStatus('online');
+        } catch (fetchError) {
+          clearTimeout(timeoutId);
+          // If it's a network error, we're offline
+          if (fetchError instanceof Error && (fetchError.name === 'TypeError' || fetchError.name === 'AbortError')) {
+            setConnectionStatus('offline');
+          } else {
+            // Other errors might mean the endpoint is reachable but returned an error
+            setConnectionStatus('online');
+          }
+        }
+      } catch (error) {
+        setConnectionStatus('offline');
+      }
+    };
+
+    // Check on mount and when endpoint changes
+    checkConnection();
+    const interval = setInterval(checkConnection, 30000); // Check every 30 seconds
+
+    // Also listen to browser online/offline events
+    const handleOnline = () => {
+      setConnectionStatus('online');
+      checkConnection();
+    };
+    const handleOffline = () => setConnectionStatus('offline');
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [customEndpoint, apiKey]);
 
   // Stop generation handler
   const handleStopGeneration = () => {
@@ -1333,9 +1440,11 @@ function App() {
     console.log('Starting message send...');
     
     const newMessage: Message = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
       role: 'user',
       content: inputMessage,
       timestamp: new Date(),
+      edited: false,
     };
     
     setMessages(prev => [...prev, newMessage]);
@@ -1501,9 +1610,11 @@ function App() {
       setMessages(prev => [
         ...prev,
         {
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
           role: 'assistant' as const,
           content: accumulatedContent,
           timestamp: new Date(),
+          edited: false,
         } as Message,
       ]);
 
@@ -1551,22 +1662,38 @@ function App() {
         setMessages(prev => [
           ...prev,
           {
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
             role: 'assistant' as const,
             content: 'Generation stopped by user.',
             timestamp: new Date(),
+            edited: false,
           } as Message,
         ]);
         showToast('Generation stopped', 'info');
       } else {
+        // Store error message with retry capability
+        const errorMessageId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
         setMessages(prev => [
           ...prev,
           {
+            id: errorMessageId,
             role: 'assistant' as const,
             content: `Error: ${errorMessage}`,
             timestamp: new Date(),
+            edited: false,
           } as Message,
         ]);
-        showToast(`Error: ${errorMessage}`, 'error');
+        
+        // Show user-friendly error message
+        const friendlyError = getFriendlyErrorMessage(error);
+        showToast(friendlyError, 'error');
+        
+        // Store error info for retry
+        setLastError({
+          messageId: errorMessageId,
+          userMessage: newMessage,
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
       }
       
       // Record error metrics
@@ -1616,12 +1743,271 @@ function App() {
   };
 
   // Delete a specific message
-  const handleDeleteMessage = (index: number) => {
-    if (index < 0 || index >= messages.length) return;
-    
-    const newMessages = messages.filter((_, i) => i !== index);
+  const handleDeleteMessage = (messageId: string) => {
+    const newMessages = messages.filter(msg => msg.id !== messageId);
     setMessages(newMessages);
     showToast('Message deleted', 'info');
+  };
+
+  // Start editing a message
+  const handleStartEdit = (messageId: string) => {
+    const message = messages.find(msg => msg.id === messageId);
+    if (message && message.role === 'user') {
+      setEditingMessageId(messageId);
+      setEditContent(message.content);
+    }
+  };
+
+  // Cancel editing
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditContent('');
+  };
+
+  // Save edited message and regenerate response
+  const handleSaveEdit = async (messageId: string) => {
+    const messageIndex = messages.findIndex(msg => msg.id === messageId);
+    if (messageIndex === -1 || messages[messageIndex].role !== 'user') return;
+
+    const message = messages[messageIndex];
+    const originalContent = message.originalContent || message.content;
+    const newContent = editContent.trim();
+
+    if (newContent === message.content) {
+      // No changes, just cancel
+      handleCancelEdit();
+      return;
+    }
+
+    // Update the message
+    const updatedMessages = messages.map((msg, idx) => {
+      if (msg.id === messageId) {
+        return {
+          ...msg,
+          content: newContent,
+          edited: true,
+          originalContent: originalContent,
+        };
+      }
+      // Remove all messages after this one (user and assistant pairs)
+      if (idx > messageIndex) {
+        return null;
+      }
+      return msg;
+    }).filter((msg): msg is Message => msg !== null);
+
+    setMessages(updatedMessages);
+    setEditingMessageId(null);
+    setEditContent('');
+    showToast('Message edited', 'success');
+
+    // Regenerate response with edited message
+    setIsLoading(true);
+    const startTime = Date.now();
+    let firstTokenTime = Date.now();
+
+    try {
+      const endpoint = customEndpoint;
+      const request = {
+        messages: updatedMessages.map(msg => ({ role: msg.role, content: msg.content })),
+        temperature: temperature,
+        max_tokens: maxTokens,
+        top_p: topP,
+        stream: true,
+      };
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      const response = await fetch(`${endpoint}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      let accumulatedContent = '';
+      let accumulatedThinking = '';
+      let inThinkingMode = false;
+      const decoder = new TextDecoder();
+
+      const thinkingStartMarkers = [
+        '<thinking>', '<reasoning>', '<internal>', '<think>',
+        'let me think', 'i need to', 'first, let me',
+        'step 1:', 'analysis:', 'reasoning:',
+        'processing...', 'analyzing...', 'computing...'
+      ];
+
+      const thinkingEndMarkers = [
+        '</thinking>', '</reasoning>', '</internal>', '</think>',
+        'now i can', 'based on this', 'therefore',
+        'in conclusion', 'so the answer', 'here\'s what i found'
+      ];
+
+      let hasReceivedContent = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.choices[0]?.delta?.content) {
+                const content = parsed.choices[0].delta.content;
+
+                if (!inThinkingMode) {
+                  const lowerContent = content.toLowerCase();
+                  const hasThinkingMarker = thinkingStartMarkers.some(marker =>
+                    lowerContent.includes(marker)
+                  );
+
+                  if (hasThinkingMarker) {
+                    inThinkingMode = true;
+                    setIsThinking(true);
+                    const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '').trim();
+                    accumulatedThinking = cleanContent;
+                    setThinkingContent(accumulatedThinking);
+                    continue;
+                  }
+                }
+
+                if (inThinkingMode) {
+                  const lowerContent = content.toLowerCase();
+                  const hasEndMarker = thinkingEndMarkers.some(marker =>
+                    lowerContent.includes(marker)
+                  );
+
+                  if (hasEndMarker) {
+                    inThinkingMode = false;
+                    setIsThinking(false);
+                    const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '').trim();
+                    accumulatedContent = cleanContent;
+                    setResponseContent(accumulatedContent);
+                    continue;
+                  }
+                }
+
+                if (inThinkingMode) {
+                  const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '');
+                  accumulatedThinking += cleanContent;
+                  setThinkingContent(accumulatedThinking);
+                  hasReceivedContent = true;
+                } else {
+                  const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '');
+                  accumulatedContent += cleanContent;
+                  setResponseContent(accumulatedContent);
+                  hasReceivedContent = true;
+                  
+                  if (!hasReceivedContent) {
+                    firstTokenTime = Date.now() - startTime;
+                  }
+                }
+              }
+            } catch (parseError) {
+              console.error('Error parsing JSON:', parseError);
+            }
+          }
+        }
+      }
+
+      if (!hasReceivedContent) {
+        accumulatedContent = 'I apologize, but I encountered an issue processing your request. Please try again.';
+      }
+
+      setMessages(prev => [
+        ...prev,
+        {
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+          role: 'assistant',
+          content: accumulatedContent,
+          timestamp: new Date(),
+          edited: false,
+        } as Message
+      ]);
+
+      const endTime = Date.now();
+      const totalTime = endTime - startTime;
+      const tokensPerSecond = accumulatedContent.length > 0 ? (accumulatedContent.length / (totalTime / 1000)) : 0;
+
+      recordMetrics(
+        newContent.length,
+        accumulatedContent.length,
+        totalTime,
+        firstTokenTime,
+        tokensPerSecond
+      );
+
+    } catch (error) {
+      console.error('Error regenerating after edit:', error);
+      const friendlyError = getFriendlyErrorMessage(error);
+      showToast(friendlyError, 'error');
+      
+      const errorMessageId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: errorMessageId,
+          role: 'assistant',
+          content: `Error: ${friendlyError}`,
+          timestamp: new Date(),
+          edited: false,
+        } as Message
+      ]);
+      
+      setLastError({
+        messageId: errorMessageId,
+        userMessage: updatedMessages[messageIndex],
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    } finally {
+      setIsLoading(false);
+      setIsThinking(false);
+      setThinkingContent('');
+      setResponseContent('');
+      abortControllerRef.current = null;
+    }
+  };
+
+  // Retry failed request
+  const handleRetry = async () => {
+    if (!lastError) return;
+
+    // Remove the error message
+    setMessages(prev => prev.filter(msg => msg.id !== lastError.messageId));
+    setLastError(null);
+
+    // Resend the user message
+    const userMessage = lastError.userMessage;
+    setInputMessage(userMessage.content);
+    
+    // Small delay to ensure state is updated
+    setTimeout(() => {
+      handleSendMessage();
+    }, 100);
   };
 
   // Regenerate last response
@@ -1664,9 +2050,11 @@ function App() {
     // Use the existing handleSendMessage logic but with modified history
     // We'll need to create a modified version that accepts message history
     const newMessage: Message = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
       role: 'user',
       content: lastUserMessage,
       timestamp: new Date(),
+      edited: false,
     };
     
     // Don't add the user message again since it's already in history
@@ -1812,7 +2200,13 @@ function App() {
 
       setMessages(prev => [
         ...prev,
-        { role: 'assistant', content: accumulatedContent, timestamp: new Date() }
+        {
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+          role: 'assistant',
+          content: accumulatedContent,
+          timestamp: new Date(),
+          edited: false,
+        } as Message
       ]);
       setResponseContent('');
       setThinkingContent('');
@@ -1843,22 +2237,33 @@ function App() {
         setMessages(prev => [
           ...prev,
           {
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
             role: 'assistant' as const,
             content: 'Generation stopped by user.',
             timestamp: new Date(),
+            edited: false,
           } as Message,
         ]);
         showToast('Generation stopped', 'info');
       } else {
+        const errorMessageId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
         setMessages(prev => [
           ...prev,
           {
+            id: errorMessageId,
             role: 'assistant' as const,
             content: `Error: ${errorMessage}`,
             timestamp: new Date(),
+            edited: false,
           } as Message,
         ]);
-        showToast(`Error: ${errorMessage}`, 'error');
+        const friendlyError = getFriendlyErrorMessage(error);
+        showToast(friendlyError, 'error');
+        setLastError({
+          messageId: errorMessageId,
+          userMessage: newMessage,
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
       }
       
       setIsLoading(false);
@@ -2948,8 +3353,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           </div>
 
           <div className="chat-messages" ref={chatMessagesRef}>
-            {messages.map((message: Message, index: number) => (
-              <div key={index} className={`message ${message.role}`} style={{ position: 'relative', paddingRight: '80px' }}>
+            {messages.map((message: Message, index: number) => {
+              const isEditing = editingMessageId === message.id;
+              const isError = message.content.startsWith('Error:');
+              const canRetry = isError && lastError?.messageId === message.id;
+              
+              return (
+                <div key={message.id} className={`message ${message.role}`} style={{ position: 'relative', paddingRight: '80px' }}>
                 {showTimestamps && (
                   <div style={{ 
                     fontSize: '0.75rem', 
@@ -2958,15 +3368,101 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     opacity: 0.8
                   }}>
                     {message.timestamp.toLocaleString()}
+                    {message.edited && (
+                      <span style={{ marginLeft: '8px', fontSize: '0.7rem', fontStyle: 'italic' }}>
+                        (edited)
+                      </span>
+                    )}
                   </div>
                 )}
-                <div 
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
-                  style={{ 
-                    wordBreak: 'break-word',
-                    lineHeight: '1.5'
-                  }}
-                />
+                {isEditing && message.role === 'user' ? (
+                  <div style={{ marginBottom: '10px' }}>
+                    <textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      style={{
+                        width: '100%',
+                        minHeight: '80px',
+                        padding: '8px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--input-border)',
+                        background: 'var(--input-bg)',
+                        color: 'var(--text-primary)',
+                        fontFamily: 'inherit',
+                        fontSize: '0.9rem',
+                        resize: 'vertical'
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          handleCancelEdit();
+                        } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                          handleSaveEdit(message.id);
+                        }
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                      <button
+                        onClick={() => handleSaveEdit(message.id)}
+                        disabled={!editContent.trim() || editContent.trim() === message.content}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          border: '1px solid var(--success-color)',
+                          background: 'var(--success-color)',
+                          color: '#fff',
+                          cursor: editContent.trim() && editContent.trim() !== message.content ? 'pointer' : 'not-allowed',
+                          fontSize: '0.85rem',
+                          opacity: editContent.trim() && editContent.trim() !== message.content ? 1 : 0.5
+                        }}
+                      >
+                        ✓ Save & Regenerate
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          border: '1px solid var(--border-color)',
+                          background: 'transparent',
+                          color: 'var(--text-primary)',
+                          cursor: 'pointer',
+                          fontSize: '0.85rem'
+                        }}
+                      >
+                        ✕ Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div 
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+                      style={{ 
+                        wordBreak: 'break-word',
+                        lineHeight: '1.5'
+                      }}
+                    />
+                    {canRetry && (
+                      <div style={{ marginTop: '8px', padding: '8px', background: 'var(--error-color)', borderRadius: '4px', color: '#fff', fontSize: '0.85rem' }}>
+                        <div style={{ marginBottom: '4px' }}>Request failed. Would you like to retry?</div>
+                        <button
+                          onClick={handleRetry}
+                          style={{
+                            padding: '4px 12px',
+                            borderRadius: '4px',
+                            border: '1px solid #fff',
+                            background: 'transparent',
+                            color: '#fff',
+                            cursor: 'pointer',
+                            fontSize: '0.85rem'
+                          }}
+                        >
+                          🔄 Retry
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
                 <div style={{ 
                   position: 'absolute', 
                   top: '8px', 
@@ -2999,14 +3495,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   >
                     📋
                   </button>
-                  {message.role === 'assistant' && index === messages.length - 1 && (
+                  {message.role === 'user' && !isEditing && (
                     <button
-                      onClick={handleRegenerateResponse}
+                      onClick={() => handleStartEdit(message.id)}
                       style={{
                         background: 'transparent',
-                        border: '1px solid #30363d',
+                        border: '1px solid var(--border-color)',
                         borderRadius: '4px',
-                        color: '#c9d1d9',
+                        color: 'var(--text-primary)',
                         padding: '4px 8px',
                         fontSize: '0.75rem',
                         cursor: 'pointer',
@@ -3015,11 +3511,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.opacity = '1';
-                        e.currentTarget.style.borderColor = '#7ee787';
+                        e.currentTarget.style.borderColor = 'var(--accent-color)';
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.opacity = '0.7';
-                        e.currentTarget.style.borderColor = '#30363d';
+                        e.currentTarget.style.borderColor = 'var(--border-color)';
+                      }}
+                      title="Edit message"
+                    >
+                      ✏️
+                    </button>
+                  )}
+                  {message.role === 'assistant' && index === messages.length - 1 && !isError && (
+                    <button
+                      onClick={handleRegenerateResponse}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        color: 'var(--text-primary)',
+                        padding: '4px 8px',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        opacity: 0.7,
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.opacity = '1';
+                        e.currentTarget.style.borderColor = 'var(--success-color)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.opacity = '0.7';
+                        e.currentTarget.style.borderColor = 'var(--border-color)';
                       }}
                       title="Regenerate response"
                     >
@@ -3027,12 +3550,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     </button>
                   )}
                   <button
-                    onClick={() => handleDeleteMessage(index)}
+                    onClick={() => handleDeleteMessage(message.id)}
                     style={{
                       background: 'transparent',
-                      border: '1px solid #30363d',
+                      border: '1px solid var(--border-color)',
                       borderRadius: '4px',
-                      color: '#c9d1d9',
+                      color: 'var(--text-primary)',
                       padding: '4px 8px',
                       fontSize: '0.75rem',
                       cursor: 'pointer',
@@ -3041,11 +3564,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.opacity = '1';
-                      e.currentTarget.style.borderColor = '#f85149';
+                      e.currentTarget.style.borderColor = 'var(--error-color)';
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.opacity = '0.7';
-                      e.currentTarget.style.borderColor = '#30363d';
+                      e.currentTarget.style.borderColor = 'var(--border-color)';
                     }}
                     title="Delete message"
                   >
@@ -3053,7 +3576,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
             
             {/* Thinking Section */}
             {isThinking && thinkingContent && (
@@ -3091,6 +3615,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           </div>
 
           <div className="chat-input-area">
+            {/* Connection Status Indicator */}
+            {connectionStatus !== 'online' && (
+              <div style={{
+                padding: '8px 12px',
+                marginBottom: '10px',
+                borderRadius: '6px',
+                background: connectionStatus === 'offline' ? 'var(--error-color)' : 'var(--warning-color)',
+                color: '#fff',
+                fontSize: '0.85rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <span>
+                  {connectionStatus === 'offline' ? '🔴' : '🟡'}
+                </span>
+                <span>
+                  {connectionStatus === 'offline' 
+                    ? 'Connection offline. Please check your network and endpoint.' 
+                    : 'Checking connection...'}
+                </span>
+              </div>
+            )}
             <div className="chat-input-container" style={{ 
               display: 'flex', 
               gap: '10px', 
