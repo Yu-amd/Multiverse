@@ -814,26 +814,41 @@ function App() {
       const width = window.innerWidth;
       const height = window.innerHeight;
       
-      // ROG Ally X: Simplified detection - any reasonably large screen
-      // This will trigger for most desktop/laptop screens and gaming devices
-      const isROGAllyXSize = width >= 1024 || height >= 1024;
-      
       // For testing: Force ROG Ally X layout
       const forceROGAllyX = window.location.search.includes('rog-ally') || 
                            localStorage.getItem('force-rog-ally') === 'true';
       
-      setIsROGAllyX(isROGAllyXSize || forceROGAllyX);
+      // ROG Ally X detection: Only when explicitly forced OR detected as handheld gaming device
+      // Handheld gaming devices typically have:
+      // - Screen width around 1920px (7-8 inch screens)
+      // - Screen height around 1080px
+      // - Touch capability (can be detected via user agent or touch support)
+      // - Aspect ratio close to 16:9 (1.77)
+      const aspectRatio = width / height;
+      const isHandheldGamingDevice = 
+        (width >= 1280 && width <= 2560 && height >= 720 && height <= 1440) && // Typical handheld gaming device dimensions
+        (aspectRatio >= 1.6 && aspectRatio <= 2.0) && // 16:9 to 18:9 aspect ratio
+        ('ontouchstart' in window || navigator.maxTouchPoints > 0); // Touch support
       
-      // Mobile: width < 768px OR height < 600px (for handheld devices like ROG Ally)
-      setIsMobile((width < 768 || height < 600) && !isROGAllyXSize && !forceROGAllyX);
+      const isROGAllyX = forceROGAllyX || isHandheldGamingDevice;
+      
+      setIsROGAllyX(isROGAllyX);
+      
+      // Mobile: width < 768px OR height < 600px (small screens)
+      setIsMobile((width < 768 || height < 600) && !isROGAllyX);
       
       // Tablet: 768px <= width < 1024px AND height >= 600px
-      setIsTablet(width >= 768 && width < 1024 && height >= 600 && !isROGAllyXSize && !forceROGAllyX);
+      setIsTablet(width >= 768 && width < 1024 && height >= 600 && !isROGAllyX);
+      
+      // Desktop: width >= 1024px AND height >= 600px (standard desktop/laptop)
+      // This will be the default for regular desktop/laptop screens
       
       // Debug logging
       console.log('Screen size:', width, 'x', height);
-      console.log('ROG Ally X detected:', isROGAllyXSize || forceROGAllyX);
-      console.log('Layout:', isROGAllyXSize || forceROGAllyX ? 'ROG Ally X' : 
+      console.log('Aspect ratio:', aspectRatio.toFixed(2));
+      console.log('Touch support:', 'ontouchstart' in window || navigator.maxTouchPoints > 0);
+      console.log('ROG Ally X detected:', isROGAllyX, '(forced:', forceROGAllyX, ', handheld:', isHandheldGamingDevice, ')');
+      console.log('Layout:', isROGAllyX ? 'ROG Ally X' : 
                   (width < 768 || height < 600) ? 'Mobile' : 
                   (width >= 768 && width < 1024) ? 'Tablet' : 'Desktop');
     };
@@ -2183,20 +2198,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           </div>
 
           <div className="chat-input-area">
-            <div className="chat-input-container">
+            <div className="chat-input-container" style={{ 
+              display: 'flex', 
+              gap: '10px', 
+              alignItems: 'flex-end',
+              flexDirection: 'row'
+            }}>
               <textarea
                 className="chat-input"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Type your message here..."
+                style={{
+                  flex: 1,
+                  resize: 'none'
+                }}
               />
               <button 
                 className="send-button"
                 onClick={handleSendMessage} 
                 disabled={!inputMessage.trim() || isLoading}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0',
+                  background: isLoading ? 'transparent' : 'transparent',
+                  border: isLoading ? '1px solid #30363d' : '1px solid #d2a8ff',
+                  cursor: (!inputMessage.trim() || isLoading) ? 'not-allowed' : 'pointer',
+                  opacity: (!inputMessage.trim() || isLoading) ? 0.5 : 1,
+                  width: isROGAllyX ? '60px' : '44px',
+                  height: isROGAllyX ? '60px' : '44px',
+                  minWidth: isROGAllyX ? '60px' : '44px',
+                  minHeight: isROGAllyX ? '60px' : '44px',
+                  borderRadius: '6px',
+                  overflow: 'hidden',
+                  flexShrink: 0,
+                  alignSelf: 'flex-end'
+                }}
               >
-                {isLoading ? '⏳' : '✈️'}
+                {isLoading ? (
+                  <span style={{ fontSize: isROGAllyX ? '1.2rem' : '1rem' }}>⏳</span>
+                ) : (
+                  <img 
+                    src="/multiverse_icon.png" 
+                    alt="Multiverse" 
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      display: 'block'
+                    }}
+                    onError={(e) => {
+                      // Fallback to text if image fails to load
+                      (e.target as HTMLImageElement).style.display = 'none';
+                      (e.target as HTMLImageElement).parentElement!.textContent = '✈️';
+                    }}
+                  />
+                )}
               </button>
             </div>
           </div>
@@ -2635,7 +2695,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               alignItems: 'center',
               marginBottom: '20px'
             }}>
-              <h2 style={{ margin: 0, color: '#c9d1d9', fontWeight: 600 }}>📊 Performance Dashboard</h2>
+              <h2 style={{ margin: 0, color: '#c9d1d9', fontWeight: 600, fontSize: isROGAllyX ? '1.8rem' : '1.5rem' }}>📊 Performance Dashboard</h2>
               <button 
                 onClick={() => setShowDashboard(false)}
                 style={{
@@ -2671,7 +2731,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   padding: '8px 16px',
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontSize: isMobile ? '0.8rem' : '1rem',
+                  fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem',
                   fontWeight: 500,
                   transition: 'all 0.2s'
                 }}
@@ -2687,7 +2747,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   padding: '8px 16px',
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontSize: isMobile ? '0.8rem' : '1rem',
+                  fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem',
                   fontWeight: 500,
                   transition: 'all 0.2s'
                 }}
@@ -2703,7 +2763,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   padding: '8px 16px',
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontSize: isMobile ? '0.8rem' : '1rem',
+                  fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem',
                   fontWeight: 500,
                   transition: 'all 0.2s'
                 }}
@@ -2727,8 +2787,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr 1fr', gap: '20px', marginBottom: '20px' }}>
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="Latency Metrics: Prompt-to-first-token = real-time measurement from API response (firstTokenTime - startTime in ms). Total response time = real-time measurement from API response (endTime - startTime in ms)" />
-                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600 }}>🔹 Latency</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Latency</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>
                           Prompt-to-first-token: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.promptToFirstToken.toFixed(1)} ms</span>
                         </div>
@@ -2740,8 +2800,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="Token Throughput: Tokens/sec = real-time calculation from API response (responseLength / (totalTime / 1000)). Tokens in/out = real-time token counts from API request/response" />
-                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600 }}>🔹 Token Throughput</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Token Throughput</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>
                           Tokens/sec: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.tokensPerSecond.toFixed(1)} t/s</span>
                         </div>
@@ -2753,8 +2813,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="Context Utilization: Prompt length = real-time input token count from API request. Max tokens = context window size from API configuration. Utilization = real-time calculation (promptLength / maxTokens) * 100%" />
-                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600 }}>🔹 Context Utilization</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Context Utilization</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>
                           Prompt length: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.promptLength} tokens</span>
                         </div>
@@ -2769,8 +2829,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="Performance: Active requests = real-time count of concurrent API requests. Quantization = model precision format from API (FP16/INT8/INT4). Cache hit rate = real-time cache performance tracking. Errors = real-time error count from API responses" />
-                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600 }}>🔹 Performance</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Performance</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>
                           Active requests: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.activeRequests}</span>
                         </div>
@@ -2788,7 +2848,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   </div>
                   
                   <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
-                    <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600 }}>💡 Real-time Status</h4>
+                    <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>💡 Real-time Status</h4>
                     <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
                       <div>Current model: <span style={{ color: '#7ee787', fontWeight: 600 }}>{selectedModel}</span></div>
                       <div>Endpoint: <span style={{ color: '#7ee787', fontWeight: 600 }}>{customEndpoint}</span></div>
@@ -2805,8 +2865,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr 1fr', gap: '20px', marginBottom: '20px' }}>
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="CPU Utilization: Overall = real-time CPU usage percentage from Performance API (based on long tasks and load timing). Per-core avg = overall * 0.8. Thread count = hardware concurrency from navigator.hardwareConcurrency" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 CPU Utilization</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 CPU Utilization</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>
                           Overall: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.cpuUtilization.toFixed(1)}%</span>
                         </div>
@@ -2821,8 +2881,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="Memory: RAM usage = real-time JavaScript heap usage from Performance API (performance.memory.usedJSHeapSize) in GB. Swap activity = estimated swap usage (ramUsage * 0.1). Available = total JS heap - used heap from Performance API" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Memory</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Memory</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>
                           RAM usage: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.ramUsage / 1024).toFixed(1)} GB</span> <span style={{ fontSize: '0.8rem', color: '#8b949e' }}>(system RAM for LM Studio)</span>
                         </div>
@@ -2837,8 +2897,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="Power & Thermal: Power draw = estimated from Battery API discharge rate (calculated from battery.dischargingTime). CPU temp = estimated from CPU utilization and power draw (30 + cpuUtilization * 0.4 + powerDraw * 0.2). Throttling = detected when temp > 80°C or CPU > 95%. Battery = real-time battery level from Battery API (navigator.getBattery())" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Power & Thermal</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Power & Thermal</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>
                           Power draw: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.powerDraw.toFixed(1)} W</span>
                         </div>
@@ -2856,8 +2916,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="System Status: Disk I/O = estimated from real-time RAM usage (ramUsage / 1000 MB/s). Network = estimated from power draw (powerDraw / 10 MB/s). Process PID = estimated process ID (cpuUtilization * 100 + 1000). Uptime = real-time uptime from Performance API (performance.now() / 1000 seconds)" />
-                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600 }}>💡 System Status</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>💡 System Status</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>Disk I/O: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.ramUsage / 1000).toFixed(1)} MB/s</span></div>
                         <div>Network: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.powerDraw / 10).toFixed(1)} MB/s</span></div>
                         <div>Process PID: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.floor(systemMetrics.cpuUtilization * 100) + 1000}</span></div>
@@ -2877,7 +2937,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                           </span>
                         )}
                       </h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>Compute: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.gpuUtilization.toFixed(1)}%</span></div>
                         <div>Memory: <span style={{ color: '#7ee787', fontWeight: 600 }}>
                           {systemMetrics.gpuMemoryTotal > 0 
@@ -2922,7 +2982,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                       <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>
                         ⚡ Active Accelerator (LM Studio)
                       </h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div style={{ marginBottom: '8px' }}>
                           <div>Type: <span style={{ color: '#00ff00', fontWeight: 600, fontSize: '1rem' }}>{systemMetrics.activeAccelerator}</span></div>
                           <div style={{ fontSize: '0.85rem', color: '#7ee787', marginTop: '4px' }}>{systemMetrics.acceleratorType}</div>
@@ -2959,7 +3019,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                       <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>
                         🔧 Available Accelerators
                       </h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         {systemMetrics.npuAvailable && (
                           <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid #30363d' }}>
                             <div>NPU: <span style={{ color: systemMetrics.activeAccelerator === 'NPU' ? '#00ff00' : '#7ee787', fontWeight: 600 }}>
@@ -2995,8 +3055,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr 1fr', gap: '20px', marginBottom: '20px' }}>
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="Energy Efficiency: Tokens/sec per Watt = real-time calculation from model metrics and power draw (tokensPerSecond / powerDraw). Power efficiency = real-time efficiency rating based on CPU utilization and token throughput. Battery drain rate = estimated from real-time power draw (powerDraw / 100 %/min)" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Energy Efficiency</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Energy Efficiency</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>Tokens/sec per Watt: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.tokensPerWatt.toFixed(2)} t/s/W</span></div>
                         <div>Power efficiency: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.efficiencyRating.toFixed(1)}</span></div>
                         <div>Battery drain rate: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.powerDraw / 100).toFixed(2)}%/min</span></div>
@@ -3005,8 +3065,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="Response Quality: Response time per token = real-time calculation from API response (totalResponseTime / tokensOut). Decoding smoothness = real-time calculation from token throughput (tokensPerSecond / 2). Quality score = real-time efficiency rating based on performance metrics" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Response Quality</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Response Quality</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>Response time per token: <span style={{ color: '#7ee787', fontWeight: 600 }}>{modelMetrics.tokensOut > 0 ? (modelMetrics.totalResponseTime / modelMetrics.tokensOut).toFixed(1) : '0.0'} ms/token</span></div>
                         <div>Decoding smoothness: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.min(10, Math.floor(modelMetrics.tokensPerSecond / 2))}/10</span></div>
                         <div>Quality score: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.min(10, Math.floor(compositeMetrics.efficiencyRating))}/10</span></div>
@@ -3015,8 +3075,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="Resource Balance: CPU-GPU balance = real-time ratio from Performance API CPU utilization and GPU utilization (cpuUtilization / gpuUtilization). Memory efficiency = real-time calculation from RAM usage (ramUsage / 32000 * 100%). Load distribution = real-time determination based on CPU vs GPU utilization" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Resource Balance</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Resource Balance</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>CPU-GPU balance: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(systemMetrics.cpuUtilization / systemMetrics.gpuUtilization).toFixed(2)}</span></div>
                         <div>Memory efficiency: <span style={{ color: '#7ee787', fontWeight: 600 }}>{((systemMetrics.ramUsage / 32000) * 100).toFixed(1)}%</span></div>
                         <div>Load distribution: <span style={{ color: '#7ee787', fontWeight: 600 }}>{systemMetrics.cpuUtilization > systemMetrics.gpuUtilization ? 'CPU-bound' : 'GPU-bound'}</span></div>
@@ -3025,8 +3085,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', position: 'relative' }}>
                       <HintIcon text="Thermal Performance: Thermal efficiency = real-time calculation from temperature (10 - temperature / 10). Sustained duration = estimated from real-time temperature (60 - temperature / 2 minutes). Throttle threshold = real-time detection (70°C if throttling, 80°C otherwise). Performance curve = real-time status based on throttling detection" />
-                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px' }}>🔹 Thermal Performance</h4>
-                      <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
+                      <h4 style={{ color: '#ffa657', fontWeight: 600, marginBottom: '10px', fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Thermal Performance</h4>
+                      <div style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem', color: '#c9d1d9' }}>
                         <div>Thermal efficiency: <span style={{ color: '#7ee787', fontWeight: 600 }}>{Math.max(0, Math.floor(10 - systemMetrics.temperature / 10))}/10</span></div>
                         <div>Sustained duration: <span style={{ color: '#7ee787', fontWeight: 600 }}>{(60 - systemMetrics.temperature / 2).toFixed(1)} min</span></div>
                         <div>Throttle threshold: <span style={{ color: '#f85149', fontWeight: 600 }}>{systemMetrics.isThrottling ? '70°C' : '80°C'}</span></div>
@@ -3036,7 +3096,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   </div>
                   
                   <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', border: '1px solid #30363d' }}>
-                    <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600 }}>💡 Performance Insights</h4>
+                    <h4 style={{ color: '#ffa657', marginBottom: '10px', fontWeight: 600, fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>💡 Performance Insights</h4>
                     <div style={{ fontSize: '0.9rem', color: '#c9d1d9' }}>
                       <div>Optimal settings detected: <span style={{ color: '#7ee787', fontWeight: 600 }}>{compositeMetrics.efficiencyRating > 7 ? 'Yes' : 'No'}</span></div>
                       <div>Recommended adjustments: <span style={{ color: '#ffa657', fontWeight: 600 }}>{systemMetrics.isThrottling ? 'Reduce load' : 'None'}</span></div>
