@@ -29,12 +29,31 @@ export const VirtualizedMessages: React.FC<VirtualizedMessagesProps> = ({
   useEffect(() => {
     const updateHeight = () => {
       if (containerRef.current) {
-        setContainerHeight(containerRef.current.clientHeight);
+        // Get the parent container height if available
+        const parent = containerRef.current.parentElement;
+        if (parent) {
+          setContainerHeight(parent.clientHeight);
+        } else {
+          setContainerHeight(containerRef.current.clientHeight);
+        }
       }
     };
 
     updateHeight();
     window.addEventListener('resize', updateHeight);
+    
+    // Use ResizeObserver for more accurate height tracking
+    if (containerRef.current?.parentElement) {
+      const resizeObserver = new ResizeObserver(() => {
+        updateHeight();
+      });
+      resizeObserver.observe(containerRef.current.parentElement);
+      return () => {
+        resizeObserver.disconnect();
+        window.removeEventListener('resize', updateHeight);
+      };
+    }
+    
     return () => window.removeEventListener('resize', updateHeight);
   }, []);
 
@@ -153,7 +172,17 @@ export const VirtualizedMessages: React.FC<VirtualizedMessagesProps> = ({
   // For small message lists, render all messages (no virtualization)
   if (messages.length <= 20) {
     return (
-      <div ref={containerRef} className={className}>
+      <div 
+        ref={containerRef} 
+        className={className}
+        style={{
+          height: '100%',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          flex: 1,
+          minHeight: 0
+        }}
+      >
         {messages.map((message, index) => (
           <div key={message.id}>
             {renderMessage(message, index)}
@@ -169,8 +198,11 @@ export const VirtualizedMessages: React.FC<VirtualizedMessagesProps> = ({
       className={className}
       style={{
         position: 'relative',
-        overflow: 'auto',
-        height: '100%'
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        height: '100%',
+        flex: 1,
+        minHeight: 0
       }}
     >
       {/* Spacer for items above visible area */}
