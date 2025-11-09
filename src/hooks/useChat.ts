@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import type { Message } from '../types';
 import { getFriendlyErrorMessage, isRetryableError } from '../utils/errorHandling';
 import { renderMarkdown } from '../utils/markdown';
-// import { responseCache } from '../utils/cache'; // Reserved for future non-streaming requests
+import { responseCache } from '../utils/cache';
 
 interface UseChatProps {
   messages: Message[];
@@ -84,11 +84,85 @@ export const useChat = ({
         stream: true,
       };
 
-      // Check cache first (only for non-streaming requests, but we'll skip for streaming)
-      // For streaming, we don't cache as it's real-time
-      // Cache is useful for non-streaming requests if we add that feature later
+      // Check cache first for non-streaming requests
+      // Note: For streaming requests, we can't use cache directly, but we can check
+      // if we have a cached non-streaming response for the same prompt
+      const messagesForCache = [...messages, newMessage];
+      console.log('🔍 Checking cache...', {
+        messageCount: messagesForCache.length,
+        lastMessage: messagesForCache[messagesForCache.length - 1]?.content?.substring(0, 50),
+        allMessages: messagesForCache.map(m => ({ role: m.role, content: m.content?.substring(0, 30) }))
+      });
+      
+      const cachedResponse = responseCache.get<{ content: string; timestamp: number }>(
+        endpoint,
+        messagesForCache,
+        {
+          temperature,
+          max_tokens: maxTokens,
+          top_p: topP,
+          stream: false
+        }
+      );
 
-      console.log('Sending request to:', endpoint);
+      // If we have a cached response, use it instead of making an API call
+      if (cachedResponse && cachedResponse.content) {
+        console.log('✅ Cache hit! Using cached response', {
+          contentLength: cachedResponse.content.length,
+          timestamp: new Date(cachedResponse.timestamp).toLocaleTimeString()
+        });
+        
+        // Simulate streaming for better UX
+        setIsLoading(true);
+        setResponseContent('');
+        
+        // Simulate token-by-token streaming from cache
+        const cachedContent = cachedResponse.content;
+        const words = cachedContent.split(' ');
+        let currentIndex = 0;
+        
+        const streamInterval = setInterval(() => {
+          if (currentIndex < words.length) {
+            const chunk = words.slice(0, currentIndex + 1).join(' ');
+            setResponseContent(chunk);
+            currentIndex++;
+          } else {
+            clearInterval(streamInterval);
+            setIsLoading(false);
+            setResponseContent('');
+            
+            // Add final response to messages
+            const assistantMessage: Message = {
+              id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+              role: 'assistant' as const,
+              content: cachedContent,
+              timestamp: new Date(),
+              edited: false,
+            };
+            
+            setMessages(prev => [...prev, assistantMessage]);
+            
+            // Record metrics for cached response (much faster)
+            const endTime = Date.now();
+            const totalTime = endTime - startTime;
+            recordMetrics(
+              currentInput.length,
+              cachedContent.length,
+              totalTime,
+              0, // First token latency is 0 for cache
+              cachedContent.length / (totalTime / 1000)
+            );
+          }
+        }, 20); // Fast streaming for cached responses
+        
+        return; // Exit early, don't make API call
+      }
+      
+      console.log('❌ Cache miss - making API request', {
+        endpoint,
+        messageCount: messages.length + 1,
+        params: { temperature, max_tokens: maxTokens, top_p: topP }
+      });
       console.log('Request payload:', request);
 
       // Add timeout to prevent hanging requests
@@ -231,16 +305,48 @@ export const useChat = ({
       }
 
       // Add final response to messages
-      setMessages(prev => [
-        ...prev,
-        {
-          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-          role: 'assistant' as const,
-          content: accumulatedContent,
-          timestamp: new Date(),
-          edited: false,
-        } as Message,
-      ]);
+      const assistantMessage: Message = {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        role: 'assistant' as const,
+        content: accumulatedContent,
+        timestamp: new Date(),
+        edited: false,
+      };
+      
+      setMessages(prev => [...prev, assistantMessage]);
+
+      // Cache the response for future use (non-streaming fallback)
+      // Note: We cache the final accumulated content, not the stream
+      // Use the same key format as the cache check (with stream: false)
+      // IMPORTANT: Use the messages array BEFORE adding the assistant response
+      // This matches what we used for the cache check
+      try {
+        const messagesForCache = [...messages, newMessage];
+        console.log('💾 Storing in cache...', {
+          messageCount: messagesForCache.length,
+          lastMessage: messagesForCache[messagesForCache.length - 1]?.content?.substring(0, 50),
+          allMessages: messagesForCache.map(m => ({ role: m.role, content: m.content?.substring(0, 30) }))
+        });
+        
+        responseCache.set(
+          endpoint,
+          messagesForCache,
+          {
+            temperature,
+            max_tokens: maxTokens,
+            top_p: topP,
+            stream: false
+          },
+          {
+            content: accumulatedContent,
+            timestamp: Date.now()
+          },
+          10 * 60 * 1000 // 10 minutes TTL
+        );
+        console.log('✅ Response cached successfully');
+      } catch (error) {
+        console.warn('❌ Failed to cache response:', error);
+      }
 
       // Record metrics for successful inference
       try {

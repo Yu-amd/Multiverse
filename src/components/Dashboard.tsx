@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HintIcon } from './HintIcon';
+import { responseCache } from '../utils/cache';
 
 interface DashboardProps {
   showDashboard: boolean;
@@ -68,7 +69,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
   isMobile,
   isROGAllyX
 }) => {
-  const [activeDashboardTab, setActiveDashboardTab] = useState<'model' | 'system' | 'composite'>('model');
+  const [activeDashboardTab, setActiveDashboardTab] = useState<'model' | 'system' | 'composite' | 'cache'>('model');
+  const [cacheStats, setCacheStats] = useState(responseCache.getStats());
+
+  // Update cache stats periodically
+  useEffect(() => {
+    if (!showDashboard) return;
+    
+    const interval = setInterval(() => {
+      setCacheStats(responseCache.getStats());
+    }, 2000); // Update every 2 seconds
+
+    return () => clearInterval(interval);
+  }, [showDashboard]);
 
   if (!showDashboard) return null;
 
@@ -125,6 +138,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
             }}
           >
             📊 Composite Insights
+          </button>
+          <button 
+            className={`dashboard-tab ${activeDashboardTab === 'cache' ? 'active' : ''}`}
+            onClick={() => setActiveDashboardTab('cache')}
+            style={{
+              fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem'
+            }}
+          >
+            💾 Cache Statistics
           </button>
         </div>
 
@@ -450,6 +472,180 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <div>Recommended adjustments: <span className="warning">{systemMetrics.isThrottling ? 'Reduce load' : 'None'}</span></div>
                   <div>Performance trend: <span className="value">{compositeMetrics.performanceTrend}</span></div>
                   <div>Efficiency rating: <span className="value">{compositeMetrics.efficiencyRating.toFixed(1)}/10</span></div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeDashboardTab === 'cache' && (
+            <div>
+              {/* Cache Statistics Banner */}
+              {cacheStats.size > 0 || (cacheStats.simpleSize || 0) > 0 ? (
+                <div style={{
+                  padding: '10px 15px',
+                  marginBottom: '15px',
+                  borderRadius: '6px',
+                  background: 'var(--metric-bg)',
+                  border: '1px solid var(--metric-border)',
+                  fontSize: '0.85rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '10px'
+                }}>
+                  <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      💾 Cache: <strong style={{ color: 'var(--text-primary)' }}>{cacheStats.size + (cacheStats.simpleSize || 0)}</strong> entries ({cacheStats.size} full-context, {cacheStats.simpleSize || 0} simple)
+                    </span>
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      ✅ Hit Rate: <strong style={{ color: 'var(--success-color)' }}>{(cacheStats.hitRate * 100).toFixed(1)}%</strong>
+                    </span>
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      📊 Hits: <strong style={{ color: 'var(--text-primary)' }}>{(cacheStats.hits || 0) + (cacheStats.simpleHits || 0)}</strong> ({cacheStats.hits || 0} full-context, {cacheStats.simpleHits || 0} simple) / Misses: <strong style={{ color: 'var(--text-primary)' }}>{cacheStats.misses}</strong>
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      responseCache.clear();
+                      setCacheStats(responseCache.getStats());
+                    }}
+                    style={{
+                      padding: '4px 12px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      background: 'transparent',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer',
+                      fontSize: '0.8rem'
+                    }}
+                    title="Clear cache"
+                  >
+                    🗑️ Clear Cache
+                  </button>
+                </div>
+              ) : null}
+
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+                <div className="metric-card" style={{ position: 'relative' }}>
+                  <HintIcon text="Cache Overview: Total entries = number of cached responses (full-context + simple Q&A). Simple cache = Q&A cache (last message only). Cache size = maximum number of entries allowed (100). Hit rate = percentage of cache hits vs total requests. Total requests = hits + misses" />
+                  <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>💾 Cache Overview</h4>
+                  <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
+                    <div>
+                      Full-context entries: <span className="value">{cacheStats.size}</span>
+                    </div>
+                    <div>
+                      Simple Q&A entries: <span className="value">{cacheStats.simpleSize}</span>
+                    </div>
+                    <div>
+                      Total entries: <span className="value">{cacheStats.size + cacheStats.simpleSize}</span>
+                    </div>
+                    <div>
+                      Cache size: <span className="value">100 entries (max)</span>
+                    </div>
+                    <div>
+                      Hit rate: <span className="value" style={{ color: cacheStats.hitRate > 0.5 ? 'var(--success-color)' : 'var(--text-primary)' }}>
+                        {(cacheStats.hitRate * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <div>
+                      Total requests: <span className="value">{(cacheStats.hits || 0) + (cacheStats.simpleHits || 0) + cacheStats.misses}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="metric-card" style={{ position: 'relative' }}>
+                  <HintIcon text="Cache Performance: Full-context hits = hits from full conversation history cache. Simple Q&A hits = hits from simple Q&A cache (last message only). Misses = number of cache misses. Hit/Miss ratio = ratio of total hits to misses. Cache efficiency = how well the cache is performing" />
+                  <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>📊 Cache Performance</h4>
+                  <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
+                    <div>
+                      Full-context hits: <span className="value" style={{ color: 'var(--success-color)' }}>{cacheStats.hits || 0}</span>
+                    </div>
+                    <div>
+                      Simple Q&A hits: <span className="value" style={{ color: 'var(--success-color)' }}>{cacheStats.simpleHits || 0}</span>
+                    </div>
+                    <div>
+                      Total hits: <span className="value" style={{ color: 'var(--success-color)' }}>{(cacheStats.hits || 0) + (cacheStats.simpleHits || 0)}</span>
+                    </div>
+                    <div>
+                      Misses: <span className="value" style={{ color: 'var(--text-primary)' }}>{cacheStats.misses}</span>
+                    </div>
+                    <div>
+                      Hit/Miss ratio: <span className="value">
+                        {cacheStats.misses > 0 
+                          ? (((cacheStats.hits || 0) + (cacheStats.simpleHits || 0)) / cacheStats.misses).toFixed(2)
+                          : (cacheStats.hits || 0) + (cacheStats.simpleHits || 0) > 0 ? '∞' : '0.00'}
+                      </span>
+                    </div>
+                    <div>
+                      Cache efficiency: <span className="value" style={{ color: cacheStats.hitRate > 0.7 ? 'var(--success-color)' : cacheStats.hitRate > 0.4 ? 'var(--warning-color)' : 'var(--text-primary)' }}>
+                        {cacheStats.hitRate > 0.7 ? 'Excellent' : cacheStats.hitRate > 0.4 ? 'Good' : cacheStats.hitRate > 0.1 ? 'Fair' : 'Poor'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="metric-card" style={{ position: 'relative' }}>
+                <HintIcon text="Cache Management: TTL = Time To Live (10 minutes default). Entries expire after TTL. Clear cache removes all cached entries. Reset stats clears hit/miss counters but keeps cache entries" />
+                <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>⚙️ Cache Management</h4>
+                <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
+                  <div style={{ marginBottom: '15px' }}>
+                    <div>TTL (Time To Live): <span className="value">10 minutes</span></div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                      Cached responses expire after 10 minutes
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <button
+                      onClick={() => {
+                        responseCache.clear();
+                        setCacheStats(responseCache.getStats());
+                      }}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--error-color)',
+                        background: 'transparent',
+                        color: 'var(--error-color)',
+                        cursor: 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: '500'
+                      }}
+                      title="Clear all cached entries"
+                    >
+                      🗑️ Clear Cache
+                    </button>
+                    <button
+                      onClick={() => {
+                        responseCache.resetStats();
+                        setCacheStats(responseCache.getStats());
+                      }}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        background: 'transparent',
+                        color: 'var(--text-primary)',
+                        cursor: 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: '500'
+                      }}
+                      title="Reset hit/miss statistics"
+                    >
+                      🔄 Reset Stats
+                    </button>
+                  </div>
+                  {cacheStats.oldestEntry && cacheStats.newestEntry && (
+                    <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid var(--border-color)' }}>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        Oldest entry: <span className="value">{new Date(cacheStats.oldestEntry).toLocaleTimeString()}</span>
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                        Newest entry: <span className="value">{new Date(cacheStats.newestEntry).toLocaleTimeString()}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

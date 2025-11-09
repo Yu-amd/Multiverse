@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import type { Message } from '../types';
 import { useChat } from '../hooks/useChat';
 import { renderMarkdown } from '../utils/markdown';
+import { VirtualizedMessages } from './VirtualizedMessages';
 
 interface ChatContainerProps {
   messages: Message[];
@@ -124,152 +125,128 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         </div>
       </div>
 
-      <div className="chat-messages" ref={chatMessagesRef}>
-        {messages.map((message: Message, index: number) => {
-          const isEditing = editingMessageId === message.id;
-          const isError = message.content.startsWith('Error:');
-          const canRetry = isError && lastError?.messageId === message.id;
-          
-          return (
-            <div key={message.id} className={`message ${message.role}`} style={{ position: 'relative', paddingRight: '80px' }}>
-              {showTimestamps && (
-                <div style={{ 
-                  fontSize: '0.75rem', 
-                  color: 'var(--text-secondary)', 
-                  marginBottom: '4px',
-                  opacity: 0.8
-                }}>
-                  {message.timestamp.toLocaleString()}
-                  {message.edited && (
-                    <span style={{ marginLeft: '8px', fontSize: '0.7rem', fontStyle: 'italic' }}>
-                      (edited)
-                    </span>
-                  )}
-                </div>
-              )}
-              {isEditing && message.role === 'user' ? (
-                <div style={{ marginBottom: '10px' }}>
-                  <textarea
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    style={{
-                      width: '100%',
-                      minHeight: '80px',
-                      padding: '8px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--input-border)',
-                      background: 'var(--input-bg)',
-                      color: 'var(--text-primary)',
-                      fontFamily: 'inherit',
-                      fontSize: '0.9rem',
-                      resize: 'vertical'
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') {
-                        handleCancelEdit();
-                      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                        handleSaveEdit(message.id);
-                      }
-                    }}
-                  />
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                    <button
-                      onClick={() => handleSaveEdit(message.id)}
-                      disabled={!editContent.trim() || editContent.trim() === message.content}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: '4px',
-                        border: '1px solid var(--success-color)',
-                        background: 'var(--success-color)',
-                        color: '#fff',
-                        cursor: editContent.trim() && editContent.trim() !== message.content ? 'pointer' : 'not-allowed',
-                        fontSize: '0.85rem',
-                        opacity: editContent.trim() && editContent.trim() !== message.content ? 1 : 0.5
-                      }}
-                    >
-                      ✓ Save & Regenerate
-                    </button>
-                    <button
-                      onClick={handleCancelEdit}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: '4px',
-                        border: '1px solid var(--border-color)',
-                        background: 'transparent',
-                        color: 'var(--text-primary)',
-                        cursor: 'pointer',
-                        fontSize: '0.85rem'
-                      }}
-                    >
-                      ✕ Cancel
-                    </button>
+      <div className="chat-messages" ref={chatMessagesRef} style={{ height: '100%', overflow: 'hidden' }}>
+        <VirtualizedMessages
+          messages={messages}
+          renderMessage={(message, index) => {
+            const isEditing = editingMessageId === message.id;
+            const isError = message.content.startsWith('Error:');
+            const canRetry = isError && lastError?.messageId === message.id;
+            
+            return (
+              <div key={message.id} className={`message ${message.role}`} style={{ position: 'relative', paddingRight: '80px' }}>
+                {showTimestamps && (
+                  <div style={{ 
+                    fontSize: '0.75rem', 
+                    color: 'var(--text-secondary)', 
+                    marginBottom: '4px',
+                    opacity: 0.8
+                  }}>
+                    {message.timestamp.toLocaleString()}
+                    {message.edited && (
+                      <span style={{ marginLeft: '8px', fontSize: '0.7rem', fontStyle: 'italic' }}>
+                        (edited)
+                      </span>
+                    )}
                   </div>
-                </div>
-              ) : (
-                <>
-                  <div 
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
-                    style={{ 
-                      wordBreak: 'break-word',
-                      lineHeight: '1.5'
-                    }}
-                  />
-                  {canRetry && (
-                    <div style={{ marginTop: '8px', padding: '8px', background: 'var(--error-color)', borderRadius: '4px', color: '#fff', fontSize: '0.85rem' }}>
-                      <div style={{ marginBottom: '4px' }}>Request failed. Would you like to retry?</div>
+                )}
+                {isEditing && message.role === 'user' ? (
+                  <div style={{ marginBottom: '10px' }}>
+                    <textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      style={{
+                        width: '100%',
+                        minHeight: '80px',
+                        padding: '8px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--input-border)',
+                        background: 'var(--input-bg)',
+                        color: 'var(--text-primary)',
+                        fontFamily: 'inherit',
+                        fontSize: '0.9rem',
+                        resize: 'vertical'
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          handleCancelEdit();
+                        } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                          handleSaveEdit(message.id);
+                        }
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
                       <button
-                        onClick={handleRetry}
+                        onClick={() => handleSaveEdit(message.id)}
+                        disabled={!editContent.trim() || editContent.trim() === message.content}
                         style={{
-                          padding: '4px 12px',
+                          padding: '6px 12px',
                           borderRadius: '4px',
-                          border: '1px solid #fff',
-                          background: 'transparent',
+                          border: '1px solid var(--success-color)',
+                          background: 'var(--success-color)',
                           color: '#fff',
+                          cursor: editContent.trim() && editContent.trim() !== message.content ? 'pointer' : 'not-allowed',
+                          fontSize: '0.85rem',
+                          opacity: editContent.trim() && editContent.trim() !== message.content ? 1 : 0.5
+                        }}
+                      >
+                        ✓ Save & Regenerate
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          border: '1px solid var(--border-color)',
+                          background: 'transparent',
+                          color: 'var(--text-primary)',
                           cursor: 'pointer',
                           fontSize: '0.85rem'
                         }}
                       >
-                        🔄 Retry
+                        ✕ Cancel
                       </button>
                     </div>
-                  )}
-                </>
-              )}
-              <div style={{ 
-                position: 'absolute', 
-                top: '8px', 
-                right: '8px', 
-                display: 'flex', 
-                gap: '4px' 
-              }}>
-                <button
-                  onClick={(e) => handleCopyMessage(message.content, e)}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '4px',
-                    color: 'var(--text-primary)',
-                    padding: '4px 8px',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    opacity: 0.7,
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.opacity = '1';
-                    e.currentTarget.style.borderColor = 'var(--accent-color)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.opacity = '0.7';
-                    e.currentTarget.style.borderColor = 'var(--border-color)';
-                  }}
-                  title="Copy message"
-                >
-                  📋
-                </button>
-                {message.role === 'user' && !isEditing && (
+                  </div>
+                ) : (
+                  <>
+                    <div 
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+                      style={{ 
+                        wordBreak: 'break-word',
+                        lineHeight: '1.5'
+                      }}
+                    />
+                    {canRetry && (
+                      <div style={{ marginTop: '8px', padding: '8px', background: 'var(--error-color)', borderRadius: '4px', color: '#fff', fontSize: '0.85rem' }}>
+                        <div style={{ marginBottom: '4px' }}>Request failed. Would you like to retry?</div>
+                        <button
+                          onClick={handleRetry}
+                          style={{
+                            padding: '4px 12px',
+                            borderRadius: '4px',
+                            border: '1px solid #fff',
+                            background: 'transparent',
+                            color: '#fff',
+                            cursor: 'pointer',
+                            fontSize: '0.85rem'
+                          }}
+                        >
+                          🔄 Retry
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+                <div style={{ 
+                  position: 'absolute', 
+                  top: '8px', 
+                  right: '8px', 
+                  display: 'flex', 
+                  gap: '4px' 
+                }}>
                   <button
-                    onClick={() => handleStartEdit(message.id)}
+                    onClick={(e) => handleCopyMessage(message.content, e)}
                     style={{
                       background: 'transparent',
                       border: '1px solid var(--border-color)',
@@ -289,14 +266,66 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                       e.currentTarget.style.opacity = '0.7';
                       e.currentTarget.style.borderColor = 'var(--border-color)';
                     }}
-                    title="Edit message"
+                    title="Copy message"
                   >
-                    ✏️
+                    📋
                   </button>
-                )}
-                {message.role === 'assistant' && index === messages.length - 1 && !isError && (
+                  {message.role === 'user' && !isEditing && (
+                    <button
+                      onClick={() => handleStartEdit(message.id)}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        color: 'var(--text-primary)',
+                        padding: '4px 8px',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        opacity: 0.7,
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.opacity = '1';
+                        e.currentTarget.style.borderColor = 'var(--accent-color)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.opacity = '0.7';
+                        e.currentTarget.style.borderColor = 'var(--border-color)';
+                      }}
+                      title="Edit message"
+                    >
+                      ✏️
+                    </button>
+                  )}
+                  {message.role === 'assistant' && index === messages.length - 1 && !isError && (
+                    <button
+                      onClick={handleRegenerateResponse}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        color: 'var(--text-primary)',
+                        padding: '4px 8px',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        opacity: 0.7,
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.opacity = '1';
+                        e.currentTarget.style.borderColor = 'var(--success-color)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.opacity = '0.7';
+                        e.currentTarget.style.borderColor = 'var(--border-color)';
+                      }}
+                      title="Regenerate response"
+                    >
+                      🔄
+                    </button>
+                  )}
                   <button
-                    onClick={handleRegenerateResponse}
+                    onClick={() => handleDeleteMessage(message.id)}
                     style={{
                       background: 'transparent',
                       border: '1px solid var(--border-color)',
@@ -310,46 +339,24 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.opacity = '1';
-                      e.currentTarget.style.borderColor = 'var(--success-color)';
+                      e.currentTarget.style.borderColor = 'var(--error-color)';
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.opacity = '0.7';
                       e.currentTarget.style.borderColor = 'var(--border-color)';
                     }}
-                    title="Regenerate response"
+                    title="Delete message"
                   >
-                    🔄
+                    🗑️
                   </button>
-                )}
-                <button
-                  onClick={() => handleDeleteMessage(message.id)}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '4px',
-                    color: 'var(--text-primary)',
-                    padding: '4px 8px',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    opacity: 0.7,
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.opacity = '1';
-                    e.currentTarget.style.borderColor = 'var(--error-color)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.opacity = '0.7';
-                    e.currentTarget.style.borderColor = 'var(--border-color)';
-                  }}
-                  title="Delete message"
-                >
-                  🗑️
-                </button>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          }}
+          itemHeight={120}
+          overscan={3}
+          className="virtualized-messages"
+        />
         
         {/* Thinking Section */}
         {isThinking && thinkingContent && (
