@@ -45,6 +45,7 @@ import { useConversation } from './hooks/useConversation';
 import { useTheme } from './hooks/useTheme';
 import { useToast } from './hooks/useToast';
 import { useConnection } from './hooks/useConnection';
+import { useBackendMetrics } from './hooks/useBackendMetrics';
 import { debounce } from './utils/debounce';
 import { useChat } from './hooks/useChat';
 
@@ -69,6 +70,23 @@ function App() {
   const { theme, setTheme } = useTheme();
   const { toasts, showToast, removeToast } = useToast();
   const connectionStatus = useConnection(customEndpoint, apiKey);
+  
+  // Backend metrics service (optional - falls back to browser metrics if unavailable)
+  const backendMetricsUrl = 'http://localhost:8000'; // Can be made configurable
+  const { 
+    metrics: backendMetrics, 
+    connected: backendConnected
+  } = useBackendMetrics({
+    backendUrl: backendMetricsUrl,
+    enabled: true, // Can be made configurable via settings
+    onError: () => {
+      // Only log if we've exhausted all reconnection attempts
+      // The hook itself will log connection status
+      if (import.meta.env.DEV) {
+        console.debug('[Backend Metrics] Using browser metrics as fallback');
+      }
+    }
+  });
 
   // Chat functionality - ChatContainer uses useChat internally
   // We only need handleDeleteMessage for ChatContainer
@@ -264,7 +282,11 @@ function App() {
     let igpuMemoryTotal = 0;
 
     try {
-      console.log('Detecting accelerators for:', gpuInfo);
+      // Only log once in development
+      if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+        console.debug('Detecting accelerators for:', gpuInfo);
+        acceleratorDetectionLoggedRef.current = true;
+      }
       
       // Check if it's an integrated GPU (like Strix Halo)
       const gpuModelLower = gpuInfo.model.toLowerCase();
@@ -299,7 +321,10 @@ function App() {
                           // Intel integrated graphics
                           (vendorLower === 'intel' && (gpuModelLower.includes('uhd') || gpuModelLower.includes('iris') || (gpuModelLower.includes('arc') && !gpuModelLower.includes('a770'))));
 
-      console.log('Is integrated GPU?', isIntegrated, 'Model:', gpuModelLower, 'Vendor:', vendorLower, 'IsKnownDiscrete:', isKnownDiscreteGPU, 'IsUnknownOnLinux:', isUnknownOnLinux);
+      // Only log once in development
+      if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+        console.debug('Is integrated GPU?', isIntegrated, 'Model:', gpuModelLower, 'Vendor:', vendorLower, 'IsKnownDiscrete:', isKnownDiscreteGPU, 'IsUnknownOnLinux:', isUnknownOnLinux);
+      }
 
       if (isIntegrated) {
         igpuAvailable = true;
@@ -311,7 +336,10 @@ function App() {
           igpuModel = 'AMD Strix Halo (RDNA 3.5)';
           acceleratorType = 'AMD Strix Halo (RDNA 3.5) - 40 RDNA 3.5 CUs';
           igpuMemoryTotal = 16 * 1024; // Shared system memory
-          console.log('Detected Strix Halo as iGPU');
+          // Only log once in development
+        if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+          console.debug('Detected Strix Halo as iGPU');
+        }
         } else if (gpuModelLower.includes('rdna') || (vendorLower === 'amd' && !isKnownDiscreteGPU)) {
           // Other AMD RDNA iGPUs or any AMD GPU that's not a known discrete model
           if (gpuModelLower.includes('rdna')) {
@@ -328,7 +356,10 @@ function App() {
             acceleratorType = igpuModel;
           }
           igpuMemoryTotal = 8 * 1024; // Typical for modern AMD APUs
-          console.log('Detected AMD iGPU:', igpuModel);
+          // Only log once in development
+          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+            console.debug('Detected AMD iGPU:', igpuModel);
+          }
         } else {
           igpuModel = gpuInfo.model;
           acceleratorType = gpuInfo.model;
@@ -355,11 +386,17 @@ function App() {
             acceleratorType = igpuModel;
             igpuMemoryTotal = 8 * 1024;
           }
-          console.log('Defaulting to iGPU (AMD or Linux unknown):', igpuModel);
+          // Only log once in development
+          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+            console.debug('Defaulting to iGPU (AMD or Linux unknown):', igpuModel);
+          }
         } else {
           activeAccelerator = 'dGPU';
           acceleratorType = gpuInfo.model !== 'Unknown' ? `${gpuInfo.vendor} ${gpuInfo.model}` : 'Discrete GPU';
-          console.log('Detected as discrete GPU:', acceleratorType);
+          // Only log once in development
+          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+            console.debug('Detected as discrete GPU:', acceleratorType);
+          }
         }
       }
 
@@ -396,6 +433,23 @@ function App() {
   };
 
   // Real GPU detection using browser APIs
+  // Cache WebGPU availability to avoid repeated failed attempts
+  const webGpuAvailableRef = useRef<boolean | null>(null);
+  const gpuDetectionLoggedRef = useRef(false);
+  const acceleratorDetectionLoggedRef = useRef(false);
+  const cachedAcceleratorRef = useRef<{
+    gpuModel: string;
+    active: string;
+    type: string;
+    npuAvailable: boolean;
+    npuUtilization: number;
+    npuModel: string;
+    igpuAvailable: boolean;
+    igpuUtilization: number;
+    igpuModel: string;
+    igpuMemoryTotal: number;
+  } | null>(null);
+  
   const detectGPU = async (): Promise<{ model: string; vendor: string; memoryTotal: number; memoryBandwidth: number; computeUnits: number; clockSpeed: number }> => {
     // Default values
     let gpuModel = 'Unknown';
@@ -407,152 +461,179 @@ function App() {
 
     try {
       // Try WebGPU API first (most accurate)
-      const navWithGPU = navigator as NavigatorWithGPU;
-      if ('gpu' in navigator && navWithGPU.gpu && typeof navWithGPU.gpu.requestAdapter === 'function') {
-        const adapter = await navWithGPU.gpu.requestAdapter();
-        if (adapter) {
-          const info = await adapter.requestAdapterInfo();
-          if (info) {
-            // Extract vendor and model from adapter info
-            const vendorString = (info.vendor || '').toLowerCase();
-            const deviceString = (info.device || '').toLowerCase();
-            const description = (info.description || '').toLowerCase();
-            
-            // Log for debugging
-            console.log('WebGPU Detection:', { vendorString, deviceString, description, fullInfo: info });
+      // Skip if we've already determined WebGPU is not available
+      if (webGpuAvailableRef.current !== false) {
+        const navWithGPU = navigator as NavigatorWithGPU;
+        if ('gpu' in navigator && navWithGPU.gpu && typeof navWithGPU.gpu.requestAdapter === 'function') {
+          try {
+            const adapter = await navWithGPU.gpu.requestAdapter();
+            webGpuAvailableRef.current = adapter !== null;
+            if (adapter) {
+              const info = await adapter.requestAdapterInfo();
+              if (info) {
+                // Extract vendor and model from adapter info
+                const vendorString = (info.vendor || '').toLowerCase();
+                const deviceString = (info.device || '').toLowerCase();
+                const description = (info.description || '').toLowerCase();
+                
+                // Log for debugging
+                // Log for debugging (only once)
+                if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
+                  console.debug('WebGPU Detection:', { vendorString, deviceString, description, fullInfo: info });
+                }
 
-            // Detect AMD Strix Halo - check multiple fields
-            const allText = `${vendorString} ${deviceString} ${description}`;
-            
-            // More specific Strix Halo detection
-            if (allText.includes('strix') || allText.includes('halo') || 
-                (allText.includes('amd') && (allText.includes('rdna') || allText.includes('rdna3.5') || allText.includes('rdna 3.5')))) {
-              gpuModel = 'Strix Halo (RDNA 3.5)';
-              gpuVendor = 'AMD';
-              memoryTotal = 16 * 1024; // Strix Halo typically has 16-32GB shared memory
-              memoryBandwidth = 200; // 256-bit LPDDR5x interface (~150-250 GB/s typical)
-              computeUnits = 40; // Up to 40 RDNA 3.5 cores
-              clockSpeed = 2500; // Typical clock speed
-              console.log('Detected AMD Strix Halo!', { gpuModel, gpuVendor, memoryTotal, computeUnits });
-              return { model: gpuModel, vendor: gpuVendor, memoryTotal, memoryBandwidth, computeUnits, clockSpeed };
-            }
+                // Detect AMD Strix Halo - check multiple fields
+                const allText = `${vendorString} ${deviceString} ${description}`;
+                
+                // More specific Strix Halo detection
+                if (allText.includes('strix') || allText.includes('halo') || 
+                    (allText.includes('amd') && (allText.includes('rdna') || allText.includes('rdna3.5') || allText.includes('rdna 3.5')))) {
+                  gpuModel = 'Strix Halo (RDNA 3.5)';
+                  gpuVendor = 'AMD';
+                  memoryTotal = 16 * 1024; // Strix Halo typically has 16-32GB shared memory
+                  memoryBandwidth = 200; // 256-bit LPDDR5x interface (~150-250 GB/s typical)
+                  computeUnits = 40; // Up to 40 RDNA 3.5 cores
+                  clockSpeed = 2500; // Typical clock speed
+                  // Only log once in development
+                  if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
+                    console.debug('Detected AMD Strix Halo!', { gpuModel, gpuVendor, memoryTotal, computeUnits });
+                  }
+                  return { model: gpuModel, vendor: gpuVendor, memoryTotal, memoryBandwidth, computeUnits, clockSpeed };
+                }
 
-            // Detect AMD GPUs
-            if (vendorString.includes('amd') || vendorString.includes('ati') || description.includes('amd') || deviceString.includes('amd')) {
-              gpuVendor = 'AMD';
-              
-              // Check for specific AMD models
-              if (allText.includes('mi300x') || deviceString.includes('mi300x')) {
-                gpuModel = 'MI300X';
-                memoryTotal = 192 * 1024;
-                memoryBandwidth = 5300;
-                computeUnits = 304;
-                clockSpeed = 1700;
-              } else if (allText.includes('mi250x') || deviceString.includes('mi250x')) {
-                gpuModel = 'MI250X';
-                memoryTotal = 128 * 1024;
-                memoryBandwidth = 3277;
-                computeUnits = 220;
-                clockSpeed = 1700;
-              } else if (allText.includes('radeon') || allText.includes('rdna')) {
-                // AMD Radeon - could be Strix Halo or other
-                if (allText.includes('rdna') || allText.includes('rdna3') || allText.includes('rdna 3')) {
-                  // Try to extract specific model
-                  const rdnaMatch = allText.match(/rdna\s*([0-9.]+)/i);
-                  if (rdnaMatch) {
-                    const rdnaVersion = rdnaMatch[1];
-                    if (rdnaVersion.includes('3.5') || rdnaVersion.includes('3.5')) {
-                      gpuModel = 'Strix Halo (RDNA 3.5)';
-                      memoryTotal = 16 * 1024;
-                      memoryBandwidth = 200; // 256-bit LPDDR5x interface (~150-250 GB/s typical)
-                      computeUnits = 40;
-                      clockSpeed = 2500;
+                // Detect AMD GPUs
+                if (vendorString.includes('amd') || vendorString.includes('ati') || description.includes('amd') || deviceString.includes('amd')) {
+                  gpuVendor = 'AMD';
+                  
+                  // Check for specific AMD models
+                  if (allText.includes('mi300x') || deviceString.includes('mi300x')) {
+                    gpuModel = 'MI300X';
+                    memoryTotal = 192 * 1024;
+                    memoryBandwidth = 5300;
+                    computeUnits = 304;
+                    clockSpeed = 1700;
+                  } else if (allText.includes('mi250x') || deviceString.includes('mi250x')) {
+                    gpuModel = 'MI250X';
+                    memoryTotal = 128 * 1024;
+                    memoryBandwidth = 3277;
+                    computeUnits = 220;
+                    clockSpeed = 1700;
+                  } else if (allText.includes('radeon') || allText.includes('rdna')) {
+                    // AMD Radeon - could be Strix Halo or other
+                    if (allText.includes('rdna') || allText.includes('rdna3') || allText.includes('rdna 3')) {
+                      // Try to extract specific model
+                      const rdnaMatch = allText.match(/rdna\s*([0-9.]+)/i);
+                      if (rdnaMatch) {
+                        const rdnaVersion = rdnaMatch[1];
+                        if (rdnaVersion.includes('3.5') || rdnaVersion.includes('3.5')) {
+                          gpuModel = 'Strix Halo (RDNA 3.5)';
+                          memoryTotal = 16 * 1024;
+                          memoryBandwidth = 200; // 256-bit LPDDR5x interface (~150-250 GB/s typical)
+                          computeUnits = 40;
+                          clockSpeed = 2500;
+                        } else {
+                          gpuModel = `AMD Radeon (RDNA ${rdnaVersion})`;
+                          memoryTotal = 8 * 1024;
+                          computeUnits = 20;
+                        }
+                      } else {
+                        gpuModel = 'AMD Radeon Graphics';
+                        memoryTotal = 4 * 1024;
+                      }
                     } else {
-                      gpuModel = `AMD Radeon (RDNA ${rdnaVersion})`;
-                      memoryTotal = 8 * 1024;
-                      computeUnits = 20;
+                      // Generic AMD Radeon
+                      const radeonMatch = description.match(/radeon\s+([a-z0-9\s]+)/i);
+                      gpuModel = radeonMatch ? radeonMatch[1] : (deviceString || 'Radeon Graphics');
+                      if (allText.includes('integrated') || allText.includes('apu') || allText.includes('igpu')) {
+                        gpuModel = `AMD ${gpuModel} (iGPU)`;
+                        memoryTotal = 4 * 1024; // Typical iGPU memory
+                      }
                     }
                   } else {
-                    gpuModel = 'AMD Radeon Graphics';
-                    memoryTotal = 4 * 1024;
+                    // Use device string or description
+                    gpuModel = deviceString || description || 'AMD GPU';
+                    // Check if it's integrated
+                    if (allText.includes('integrated') || allText.includes('apu') || allText.includes('igpu')) {
+                      gpuModel = `${gpuModel} (iGPU)`;
+                      memoryTotal = 4 * 1024;
+                    }
                   }
-                } else {
-                  // Generic AMD Radeon
-                  const radeonMatch = description.match(/radeon\s+([a-z0-9\s]+)/i);
-                  gpuModel = radeonMatch ? radeonMatch[1] : (deviceString || 'Radeon Graphics');
-                  if (allText.includes('integrated') || allText.includes('apu') || allText.includes('igpu')) {
-                    gpuModel = `AMD ${gpuModel} (iGPU)`;
-                    memoryTotal = 4 * 1024; // Typical iGPU memory
+                  
+                  // If AMD GPU detected but model is still generic, mark as likely iGPU
+                  if (gpuModel === 'AMD GPU' || gpuModel === 'Unknown' || (!gpuModel.includes('RX') && !gpuModel.includes('MI'))) {
+                    // Likely an iGPU/APU
+                    if (!gpuModel.includes('(iGPU)') && !gpuModel.includes('iGPU')) {
+                      gpuModel = gpuModel === 'AMD GPU' ? 'AMD Radeon Graphics (iGPU)' : `${gpuModel} (iGPU)`;
+                    }
+                    memoryTotal = 8 * 1024; // Typical for AMD APUs
+                    computeUnits = 20; // Typical for AMD APUs
+                  }
+                  
+                  // Only log once in development
+                  if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
+                    console.debug('Detected AMD GPU:', { gpuModel, gpuVendor, deviceString, description });
                   }
                 }
-              } else {
-                // Use device string or description
-                gpuModel = deviceString || description || 'AMD GPU';
-                // Check if it's integrated
-                if (allText.includes('integrated') || allText.includes('apu') || allText.includes('igpu')) {
-                  gpuModel = `${gpuModel} (iGPU)`;
-                  memoryTotal = 4 * 1024;
+                // Detect NVIDIA GPUs
+                else if (vendorString.includes('nvidia') || description.includes('nvidia')) {
+                  gpuVendor = 'NVIDIA';
+                  if (description.includes('rtx 4090') || deviceString.includes('4090')) {
+                    gpuModel = 'RTX 4090';
+                    memoryTotal = 24 * 1024;
+                    memoryBandwidth = 1008;
+                    clockSpeed = 2520;
+                  } else if (description.includes('a100') || deviceString.includes('a100')) {
+                    gpuModel = 'A100';
+                    memoryTotal = 80 * 1024;
+                    memoryBandwidth = 2039;
+                    clockSpeed = 1410;
+                  } else if (description.includes('h100') || deviceString.includes('h100')) {
+                    gpuModel = 'H100';
+                    memoryTotal = 80 * 1024;
+                    memoryBandwidth = 3000;
+                    clockSpeed = 1830;
+                  } else {
+                    gpuModel = deviceString || description.match(/rtx\s+(\d+)/i)?.[0] || 'NVIDIA GPU';
+                  }
+                }
+                // Detect Intel GPUs
+                else if (vendorString.includes('intel') || description.includes('intel')) {
+                  gpuVendor = 'Intel';
+                  if (description.includes('arc')) {
+                    gpuModel = description.match(/arc\s+([a-z0-9\s]+)/i)?.[0] || 'Intel Arc';
+                    memoryTotal = 16 * 1024;
+                  } else if (description.includes('uhd') || description.includes('integrated')) {
+                    gpuModel = 'UHD Graphics (iGPU)';
+                    memoryTotal = 2 * 1024;
+                  } else {
+                    gpuModel = deviceString || 'Intel GPU';
+                  }
                 }
               }
-              
-              // If AMD GPU detected but model is still generic, mark as likely iGPU
-              if (gpuModel === 'AMD GPU' || gpuModel === 'Unknown' || (!gpuModel.includes('RX') && !gpuModel.includes('MI'))) {
-                // Likely an iGPU/APU
-                if (!gpuModel.includes('(iGPU)') && !gpuModel.includes('iGPU')) {
-                  gpuModel = gpuModel === 'AMD GPU' ? 'AMD Radeon Graphics (iGPU)' : `${gpuModel} (iGPU)`;
-                }
-                memoryTotal = 8 * 1024; // Typical for AMD APUs
-                computeUnits = 20; // Typical for AMD APUs
-              }
-              
-              console.log('Detected AMD GPU:', { gpuModel, gpuVendor, deviceString, description });
             }
-            // Detect NVIDIA GPUs
-            else if (vendorString.includes('nvidia') || description.includes('nvidia')) {
-              gpuVendor = 'NVIDIA';
-              if (description.includes('rtx 4090') || deviceString.includes('4090')) {
-                gpuModel = 'RTX 4090';
-                memoryTotal = 24 * 1024;
-                memoryBandwidth = 1008;
-                clockSpeed = 2520;
-              } else if (description.includes('a100') || deviceString.includes('a100')) {
-                gpuModel = 'A100';
-                memoryTotal = 80 * 1024;
-                memoryBandwidth = 2039;
-                clockSpeed = 1410;
-              } else if (description.includes('h100') || deviceString.includes('h100')) {
-                gpuModel = 'H100';
-                memoryTotal = 80 * 1024;
-                memoryBandwidth = 3000;
-                clockSpeed = 1830;
-              } else {
-                gpuModel = deviceString || description.match(/rtx\s+(\d+)/i)?.[0] || 'NVIDIA GPU';
-              }
-            }
-            // Detect Intel GPUs
-            else if (vendorString.includes('intel') || description.includes('intel')) {
-              gpuVendor = 'Intel';
-              if (description.includes('arc')) {
-                gpuModel = description.match(/arc\s+([a-z0-9\s]+)/i)?.[0] || 'Intel Arc';
-                memoryTotal = 16 * 1024;
-              } else if (description.includes('uhd') || description.includes('integrated')) {
-                gpuModel = 'UHD Graphics (iGPU)';
-                memoryTotal = 2 * 1024;
-              } else {
-                gpuModel = deviceString || 'Intel GPU';
-              }
-            }
+          } catch (webGpuError) {
+            // WebGPU failed - mark as unavailable and continue to fallback
+            webGpuAvailableRef.current = false;
+            // Don't log - this is expected on many platforms
           }
         }
       }
+    } catch (webGpuError) {
+      // WebGPU not available at all - mark and continue to fallback
+      webGpuAvailableRef.current = false;
+    }
 
-      // Fallback: Try to get GPU info from user agent or other methods
-      if (gpuModel === 'Unknown') {
+    // Fallback: Try to get GPU info from user agent or other methods
+    if (gpuModel === 'Unknown') {
+      try {
         const userAgent = navigator.userAgent.toLowerCase();
         const platform = navigator.platform.toLowerCase();
         const hardwareConcurrency = navigator.hardwareConcurrency || 0;
         
-        console.log('Fallback detection:', { userAgent, platform, hardwareConcurrency });
+        // Only log fallback detection once (in development)
+        if (import.meta.env.DEV && !webGpuAvailableRef.current) {
+          console.debug('Fallback detection:', { userAgent, platform, hardwareConcurrency });
+        }
         
         // Check for AMD Strix Halo in user agent or platform
         if (userAgent.includes('strix') || userAgent.includes('halo') || 
@@ -563,7 +644,10 @@ function App() {
           memoryBandwidth = 200; // 256-bit LPDDR5x interface (~150-250 GB/s typical)
           computeUnits = 40;
           clockSpeed = 2500;
-          console.log('Detected Strix Halo via fallback');
+          // Only log once in development
+          if (import.meta.env.DEV) {
+            console.debug('Detected Strix Halo via fallback');
+          }
         }
         // Check for AMD in general
         else if (userAgent.includes('amd') || platform.includes('amd')) {
@@ -576,7 +660,6 @@ function App() {
           } else {
             gpuModel = 'AMD GPU';
           }
-          console.log('Detected AMD via fallback');
         }
         // Linux system with high core count - likely AMD Strix Halo or modern AMD APU
         else if (platform.includes('linux') && hardwareConcurrency >= 16) {
@@ -588,7 +671,10 @@ function App() {
           memoryBandwidth = 2000;
           computeUnits = 40;
           clockSpeed = 2500;
-          console.log('Detected likely AMD Strix Halo (Linux + high core count)');
+          // Only log once in development
+          if (import.meta.env.DEV) {
+            console.debug('Detected likely AMD Strix Halo (Linux + high core count)');
+          }
         }
         // Linux system - likely AMD iGPU (most Linux laptops with AMD)
         else if (platform.includes('linux')) {
@@ -597,16 +683,19 @@ function App() {
           gpuModel = 'AMD Radeon Graphics (iGPU)';
           memoryTotal = 8 * 1024;
           computeUnits = 20;
-          console.log('Detected likely AMD iGPU (Linux fallback)');
         }
         // Check for NVIDIA
         else if (userAgent.includes('nvidia')) {
           gpuVendor = 'NVIDIA';
           gpuModel = 'NVIDIA GPU';
         }
+      } catch (error) {
+        // Only log GPU detection errors in development, and only once
+        if (import.meta.env.DEV && webGpuAvailableRef.current === null) {
+          console.debug('GPU detection error (expected on some platforms):', error);
+          webGpuAvailableRef.current = false;
+        }
       }
-    } catch (error) {
-      console.warn('GPU detection error:', error);
     }
 
     // Final check: If AMD and not clearly discrete, assume iGPU (especially for laptops)
@@ -622,10 +711,17 @@ function App() {
       if (computeUnits === 0) {
         computeUnits = 20; // Typical for AMD APUs
       }
-      console.log('Marked AMD GPU as iGPU (final check):', gpuModel);
+      // Only log once in development
+      if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
+        console.debug('Marked AMD GPU as iGPU (final check):', gpuModel);
+      }
     }
     
-    console.log('Final GPU detection result:', { model: gpuModel, vendor: gpuVendor, memoryTotal, computeUnits });
+    // Only log final result once in development
+    if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
+      console.debug('Final GPU detection result:', { model: gpuModel, vendor: gpuVendor, memoryTotal, computeUnits });
+      gpuDetectionLoggedRef.current = true;
+    }
     return { model: gpuModel, vendor: gpuVendor, memoryTotal, memoryBandwidth, computeUnits, clockSpeed };
   };
 
@@ -640,6 +736,8 @@ function App() {
   };
 
   // Responsive design detection
+  const screenSizeLoggedRef = useRef(false);
+  
   useEffect(() => {
     const checkScreenSize = () => {
       const width = window.innerWidth;
@@ -674,14 +772,17 @@ function App() {
       // Desktop: width >= 1024px AND height >= 600px (standard desktop/laptop)
       // This will be the default for regular desktop/laptop screens
       
-      // Debug logging
-      console.log('Screen size:', width, 'x', height);
-      console.log('Aspect ratio:', aspectRatio.toFixed(2));
-      console.log('Touch support:', 'ontouchstart' in window || navigator.maxTouchPoints > 0);
-      console.log('ROG Ally X detected:', isROGAllyX, '(forced:', forceROGAllyX, ', handheld:', isHandheldGamingDevice, ')');
-      console.log('Layout:', isROGAllyX ? 'ROG Ally X' : 
-                  (width < 768 || height < 600) ? 'Mobile' : 
-                  (width >= 768 && width < 1024) ? 'Tablet' : 'Desktop');
+      // Debug logging (only once in development)
+      if (import.meta.env.DEV && !screenSizeLoggedRef.current) {
+        console.debug('Screen size:', width, 'x', height);
+        console.debug('Aspect ratio:', aspectRatio.toFixed(2));
+        console.debug('Touch support:', 'ontouchstart' in window || navigator.maxTouchPoints > 0);
+        console.debug('ROG Ally X detected:', isROGAllyX, '(forced:', forceROGAllyX, ', handheld:', isHandheldGamingDevice, ')');
+        console.debug('Layout:', isROGAllyX ? 'ROG Ally X' : 
+                    (width < 768 || height < 600) ? 'Mobile' : 
+                    (width >= 768 && width < 1024) ? 'Tablet' : 'Desktop');
+        screenSizeLoggedRef.current = true;
+      }
     };
 
     checkScreenSize();
@@ -795,6 +896,21 @@ function App() {
         
         if (!mounted) return;
 
+        // Cache the accelerator detection result
+        const gpuModelKey = `${detectedGpu.vendor}-${detectedGpu.model}`;
+        cachedAcceleratorRef.current = {
+          gpuModel: gpuModelKey,
+          active: detectedAccelerators.active,
+          type: detectedAccelerators.type,
+          npuAvailable: detectedAccelerators.npuAvailable,
+          npuUtilization: detectedAccelerators.npuUtilization,
+          npuModel: detectedAccelerators.npuModel,
+          igpuAvailable: detectedAccelerators.igpuAvailable,
+          igpuUtilization: detectedAccelerators.igpuUtilization,
+          igpuModel: detectedAccelerators.igpuModel,
+          igpuMemoryTotal: detectedAccelerators.igpuMemoryTotal
+        };
+
         setSystemMetrics(prev => ({
           ...prev,
           gpuModel: detectedGpu.model,
@@ -825,10 +941,43 @@ function App() {
     const debouncedUpdateMetrics = debounce(async () => {
       try {
         const detectedGpu = await detectGPU();
-        const detectedAccelerators = await detectAccelerators(detectedGpu);
         const realTimeMetrics = await collectRealTimeMetrics();
         
         if (!mounted) return;
+
+        // Only re-detect accelerators if GPU model changed (stability fix)
+        let detectedAccelerators;
+        const gpuModelKey = `${detectedGpu.vendor}-${detectedGpu.model}`;
+        if (cachedAcceleratorRef.current?.gpuModel === gpuModelKey) {
+          // Use cached accelerator detection if GPU model hasn't changed
+          const cached = cachedAcceleratorRef.current;
+          detectedAccelerators = {
+            active: cached.active,
+            type: cached.type,
+            npuAvailable: cached.npuAvailable,
+            npuUtilization: cached.npuUtilization,
+            npuModel: cached.npuModel,
+            igpuAvailable: cached.igpuAvailable,
+            igpuUtilization: cached.igpuUtilization,
+            igpuModel: cached.igpuModel,
+            igpuMemoryTotal: cached.igpuMemoryTotal
+          };
+        } else {
+          // Re-detect accelerators only when GPU model changes
+          detectedAccelerators = await detectAccelerators(detectedGpu);
+          cachedAcceleratorRef.current = {
+            gpuModel: gpuModelKey,
+            active: detectedAccelerators.active,
+            type: detectedAccelerators.type,
+            npuAvailable: detectedAccelerators.npuAvailable,
+            npuUtilization: detectedAccelerators.npuUtilization,
+            npuModel: detectedAccelerators.npuModel,
+            igpuAvailable: detectedAccelerators.igpuAvailable,
+            igpuUtilization: detectedAccelerators.igpuUtilization,
+            igpuModel: detectedAccelerators.igpuModel,
+            igpuMemoryTotal: detectedAccelerators.igpuMemoryTotal
+          };
+        }
 
         // Calculate GPU memory usage from real-time data
         let gpuMemoryUsage = 0;
@@ -913,6 +1062,35 @@ function App() {
       clearInterval(compositeInterval);
     };
   }, [modelMetrics.tokensPerSecond]);
+
+  // Update system metrics from backend when available
+  // Note: We don't update activeAccelerator from backend - that's determined by frontend detection
+  useEffect(() => {
+    if (backendMetrics && backendConnected) {
+      const cpu = backendMetrics.cpu;
+      const memory = backendMetrics.memory;
+      const gpu = backendMetrics.gpu;
+      const battery = backendMetrics.battery;
+      
+      setSystemMetrics(prev => ({
+        ...prev,
+        cpuUtilization: cpu.utilization,
+        ramUsage: memory.used / (1024 * 1024), // Convert bytes to MB
+        gpuUtilization: gpu?.utilization || 0,
+        gpuMemoryUsage: gpu ? (gpu.memoryUsed / (1024 * 1024)) : prev.gpuMemoryUsage, // Convert bytes to MB
+        gpuMemoryTotal: gpu ? (gpu.memoryTotal / (1024 * 1024)) : prev.gpuMemoryTotal, // Convert bytes to MB
+        gpuModel: gpu?.model || prev.gpuModel,
+        gpuVendor: gpu?.vendor || prev.gpuVendor,
+        temperature: gpu?.temperature || prev.temperature,
+        powerDraw: gpu?.powerDraw || prev.powerDraw,
+        batteryLevel: battery?.level || prev.batteryLevel,
+        isThrottling: (gpu?.temperature || 0) > 80 || cpu.utilization > 95,
+        gpuClockSpeed: gpu?.graphicsClock || prev.gpuClockSpeed
+        // Don't update activeAccelerator or acceleratorType from backend
+        // These are determined by frontend detection logic which correctly identifies iGPU vs dGPU
+      }));
+    }
+  }, [backendMetrics, backendConnected]);
 
   // Helper function for handleClearChat
   const handleClearChat = () => {
@@ -1186,4 +1364,4 @@ function App() {
   );
 }
 
-        export default App;
+export default App;

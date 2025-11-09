@@ -84,6 +84,61 @@ All endpoints are OpenAI API compatible and support streaming.
 - **Tablet**: Optimized two-column layout
 - **Mobile/Handheld**: Single-column layout (perfect for ROG Ally X)
 
+## Backend Metrics Service
+
+Multiverse includes an optional backend service for real-time, accurate system metrics:
+
+### Features
+- **Real-time Metrics**: WebSocket connection for live system metrics
+- **NVIDIA GPU Support**: Integration with `nvidia-smi` via `pynvml`
+- **AMD ROCm Support**: Integration with `rocm-smi` for AMD GPUs
+- **CPU & Memory**: Accurate metrics via `psutil`
+- **Battery Metrics**: Real-time battery monitoring (laptops)
+- **Automatic Fallback**: Falls back to browser metrics if backend unavailable
+
+### Setup
+
+**Important**: Use a virtual environment to avoid conflicts with system packages.
+
+1. **Start the backend service (recommended):**
+   ```bash
+   cd backend
+   ./start.sh
+   ```
+   
+   The script will automatically:
+   - Create a virtual environment
+   - Install all dependencies
+   - Start the server
+
+2. **Or set up manually:**
+   ```bash
+   cd backend
+   python3 -m venv venv
+   source venv/bin/activate  # On Linux/Mac
+   pip install -r requirements.txt
+   python metrics_server.py
+   ```
+
+3. **The frontend will automatically connect** to `http://localhost:8000`
+
+**Note**: If you get an error about `python3-venv` not being installed:
+   ```bash
+   sudo apt install python3-venv  # On Ubuntu/Debian
+   ```
+
+### API Endpoints
+- **WebSocket**: `ws://localhost:8000/ws/metrics` - Real-time metrics stream
+- **HTTP**: `http://localhost:8000/api/metrics` - One-time metrics fetch
+- **Health**: `http://localhost:8000/api/health` - Health check
+
+### Optional Dependencies
+- **NVIDIA**: Requires `pynvml` and NVIDIA drivers
+- **AMD ROCm**: Requires `rocm-smi` in PATH
+- **Battery**: Only available on laptops
+
+The frontend gracefully falls back to browser-based metrics if the backend is unavailable.
+
 ## GPU Support
 
 Multiverse includes comprehensive GPU monitoring and optimization support:
