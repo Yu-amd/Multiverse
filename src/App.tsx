@@ -438,7 +438,10 @@ function App() {
                                   window.innerHeight >= 720 && window.innerHeight <= 1440 &&
                                   ('ontouchstart' in window || navigator.maxTouchPoints > 0));
         
-        if (isHandheldDevice) {
+        // Also check if it's AMD vendor (ROG Ally X uses AMD)
+        const isAMDOnHandheld = vendorLower === 'amd' && isHandheldDevice;
+        
+        if (isHandheldDevice || isAMDOnHandheld) {
           // Handheld gaming devices (like ROG Ally X) are always iGPU
           igpuAvailable = true;
           activeAccelerator = 'iGPU';
@@ -446,10 +449,10 @@ function App() {
           acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
           igpuMemoryTotal = 16 * 1024;
           if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-            console.debug('Detected handheld device - forcing iGPU');
+            console.debug('Detected handheld device - forcing iGPU', { isHandheldDevice, isAMDOnHandheld, vendor: vendorLower, width: window.innerWidth, height: window.innerHeight });
           }
         }
-        // If we're not sure and it's AMD, default to iGPU for laptops
+        // If we're not sure and it's AMD, default to iGPU for laptops/handhelds
         // Also default to iGPU if unknown on Linux (most common case)
         else if ((vendorLower === 'amd' && !isKnownDiscreteGPU) || 
             (isUnknownOnLinux && !isKnownDiscreteGPU)) {
@@ -508,6 +511,34 @@ function App() {
       }
     } catch (error) {
       console.warn('Accelerator detection error:', error);
+    }
+
+    // FINAL OVERRIDE: Force iGPU for handheld gaming devices (ROG Ally X)
+    // This check happens at the very end to override any previous detection
+    const isHandheldDevice = (window.innerWidth >= 1280 && window.innerWidth <= 2560 && 
+                              window.innerHeight >= 720 && window.innerHeight <= 1440 &&
+                              ('ontouchstart' in window || navigator.maxTouchPoints > 0));
+    
+    // Get vendor from gpuInfo (defined outside try block)
+    const vendorLowerFinal = gpuInfo.vendor.toLowerCase();
+    
+    if (isHandheldDevice && vendorLowerFinal === 'amd') {
+      // Override to iGPU for AMD handheld devices (ROG Ally X)
+      activeAccelerator = 'iGPU';
+      igpuAvailable = true;
+      igpuModel = 'ROG Ally X (RDNA 3)';
+      acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
+      igpuMemoryTotal = 16 * 1024;
+      if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+        console.debug('FINAL OVERRIDE: Forcing iGPU for AMD handheld device', {
+          width: window.innerWidth,
+          height: window.innerHeight,
+          touchSupport: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
+          vendor: vendorLowerFinal,
+          gpuModel: gpuInfo.model,
+          gpuVendor: gpuInfo.vendor
+        });
+      }
     }
 
     return {
