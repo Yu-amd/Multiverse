@@ -288,51 +288,9 @@ function App() {
         acceleratorDetectionLoggedRef.current = true;
       }
       
-      // Early detection: Check for ROG Ally X via multiple methods
-      const ua = navigator.userAgent.toLowerCase();
-      const plat = navigator.platform.toLowerCase();
+      // Check if it's an integrated GPU (like Strix Halo or ROG Ally X)
       const gpuModelLower = gpuInfo.model.toLowerCase();
       const vendorLower = gpuInfo.vendor.toLowerCase();
-      
-      // Check if this is ROG Ally X (handheld gaming device)
-      const isROGAllyX = gpuModelLower.includes('rog') || 
-                        gpuModelLower.includes('ally') ||
-                        gpuModelLower.includes('z2e') ||
-                        gpuModelLower.includes('z1e') ||
-                        gpuModelLower.includes('z1 extreme') ||
-                        ua.includes('rog') ||
-                        ua.includes('ally') ||
-                        ua.includes('z2e') ||
-                        ua.includes('z1e') ||
-                        plat.includes('rog') ||
-                        plat.includes('ally') ||
-                        plat.includes('z2e') ||
-                        plat.includes('z1e');
-      
-      // If ROG Ally X detected, force iGPU immediately
-      if (isROGAllyX) {
-        igpuAvailable = true;
-        activeAccelerator = 'iGPU';
-        igpuModel = 'ROG Ally X (RDNA 3)';
-        acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
-        igpuMemoryTotal = 16 * 1024;
-        if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-          console.debug('Detected ROG Ally X - forcing iGPU');
-        }
-        return {
-          active: activeAccelerator,
-          type: acceleratorType,
-          npuAvailable: false,
-          npuUtilization: 0,
-          npuModel: 'Unknown',
-          igpuAvailable: true,
-          igpuUtilization: 0,
-          igpuModel: igpuModel,
-          igpuMemoryTotal: igpuMemoryTotal
-        };
-      }
-      
-      // Check if it's an integrated GPU (like Strix Halo)
       
       // More comprehensive integrated GPU detection
       // For AMD: If it's not a known discrete GPU (RX series, MI series), assume it's iGPU
@@ -355,19 +313,22 @@ function App() {
                                 window.innerHeight >= 720 && window.innerHeight <= 1440 &&
                                 ('ontouchstart' in window || navigator.maxTouchPoints > 0));
       
-      const isIntegrated = gpuModelLower.includes('rog') ||
+      // Check for handheld gaming devices (ROG Ally X) - these are always iGPU
+      const isHandheldGamingDevice = isHandheldDevice && vendorLower === 'amd';
+      
+      const isIntegrated = gpuModelLower.includes('strix') || 
+                          gpuModelLower.includes('halo') ||
+                          gpuModelLower.includes('rog') ||
                           gpuModelLower.includes('ally') ||
                           gpuModelLower.includes('z2e') ||
                           gpuModelLower.includes('z1e') ||
                           gpuModelLower.includes('z1 extreme') ||
-                          gpuModelLower.includes('strix') || 
-                          gpuModelLower.includes('halo') ||
                           gpuModelLower.includes('igpu') ||
                           gpuModelLower.includes('integrated') ||
                           gpuModelLower.includes('apu') ||
                           gpuModelLower.includes('(igpu)') ||
-                          // Handheld gaming devices are always iGPU
-                          isHandheldDevice ||
+                          // Handheld gaming devices (ROG Ally X) are always iGPU
+                          isHandheldGamingDevice ||
                           // AMD APUs: If AMD and not a known discrete GPU, it's likely iGPU
                           (vendorLower === 'amd' && !isKnownDiscreteGPU && (gpuModelLower.includes('radeon') || gpuModelLower.includes('rdna') || gpuModelLower !== 'unknown')) ||
                           // Unknown on Linux - likely AMD iGPU (most common case)
@@ -384,20 +345,8 @@ function App() {
         igpuAvailable = true;
         activeAccelerator = 'iGPU';
         
-        // ROG Ally X (Z2E processor) specific
-        if (gpuModelLower.includes('rog') || gpuModelLower.includes('ally') || 
-            gpuModelLower.includes('z2e') || gpuModelLower.includes('z1e') ||
-            gpuModelLower.includes('z1 extreme')) {
-          igpuModel = 'ROG Ally X (RDNA 3)';
-          acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
-          igpuMemoryTotal = 16 * 1024; // Shared system memory
-          // Only log once in development
-          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-            console.debug('Detected ROG Ally X as iGPU');
-          }
-        }
-        // AMD Strix Halo specific
-        else if (gpuModelLower.includes('strix') || gpuModelLower.includes('halo') || 
+        // AMD Strix Halo specific (check first, before ROG Ally X)
+        if (gpuModelLower.includes('strix') || gpuModelLower.includes('halo') || 
             (vendorLower === 'amd' && gpuModelLower.includes('rdna') && gpuModelLower.includes('3.5'))) {
           igpuModel = 'AMD Strix Halo (RDNA 3.5)';
           acceleratorType = 'AMD Strix Halo (RDNA 3.5) - 40 RDNA 3.5 CUs';
@@ -405,6 +354,18 @@ function App() {
           // Only log once in development
           if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
             console.debug('Detected Strix Halo as iGPU');
+          }
+        }
+        // ROG Ally X (Z2E processor) specific - check after Strix Halo
+        else if (gpuModelLower.includes('rog') || gpuModelLower.includes('ally') || 
+            gpuModelLower.includes('z2e') || gpuModelLower.includes('z1e') ||
+            gpuModelLower.includes('z1 extreme') || isHandheldGamingDevice) {
+          igpuModel = 'ROG Ally X (RDNA 3)';
+          acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
+          igpuMemoryTotal = 16 * 1024; // Shared system memory
+          // Only log once in development
+          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+            console.debug('Detected ROG Ally X as iGPU');
           }
         } else if (gpuModelLower.includes('rdna') || (vendorLower === 'amd' && !isKnownDiscreteGPU)) {
           // Other AMD RDNA iGPUs or any AMD GPU that's not a known discrete model
@@ -433,15 +394,13 @@ function App() {
         }
       } else {
         // Discrete GPU - only if we're certain it's discrete
-        // Check for handheld devices first (always iGPU)
-        const isHandheldDevice = (window.innerWidth >= 1280 && window.innerWidth <= 2560 && 
-                                  window.innerHeight >= 720 && window.innerHeight <= 1440 &&
-                                  ('ontouchstart' in window || navigator.maxTouchPoints > 0));
+        // Check for handheld gaming devices (ROG Ally X) - these are always iGPU
+        const isHandheldDeviceCheck = (window.innerWidth >= 1280 && window.innerWidth <= 2560 && 
+                                      window.innerHeight >= 720 && window.innerHeight <= 1440 &&
+                                      ('ontouchstart' in window || navigator.maxTouchPoints > 0));
+        const isHandheldGamingDevice = isHandheldDeviceCheck && vendorLower === 'amd';
         
-        // Also check if it's AMD vendor (ROG Ally X uses AMD)
-        const isAMDOnHandheld = vendorLower === 'amd' && isHandheldDevice;
-        
-        if (isHandheldDevice || isAMDOnHandheld) {
+        if (isHandheldGamingDevice) {
           // Handheld gaming devices (like ROG Ally X) are always iGPU
           igpuAvailable = true;
           activeAccelerator = 'iGPU';
@@ -449,7 +408,12 @@ function App() {
           acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
           igpuMemoryTotal = 16 * 1024;
           if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-            console.debug('Detected handheld device - forcing iGPU', { isHandheldDevice, isAMDOnHandheld, vendor: vendorLower, width: window.innerWidth, height: window.innerHeight });
+            console.debug('Detected handheld gaming device (ROG Ally X) - setting iGPU', { 
+              isHandheldDeviceCheck, 
+              vendor: vendorLower, 
+              width: window.innerWidth, 
+              height: window.innerHeight 
+            });
           }
         }
         // If we're not sure and it's AMD, default to iGPU for laptops/handhelds
@@ -461,19 +425,19 @@ function App() {
           igpuAvailable = true;
           activeAccelerator = 'iGPU';
           
+          // If Strix Halo was detected in GPU model, use that (check first)
+          if (gpuInfo.model.includes('Strix Halo') || gpuInfo.model.includes('strix') || gpuInfo.model.includes('halo')) {
+            igpuModel = 'AMD Strix Halo (RDNA 3.5)';
+            acceleratorType = 'AMD Strix Halo (RDNA 3.5) - 40 RDNA 3.5 CUs';
+            igpuMemoryTotal = 16 * 1024;
+          }
           // If ROG Ally X was detected in GPU model, use that
-          if (gpuInfo.model.includes('ROG Ally') || gpuInfo.model.includes('rog') || 
+          else if (gpuInfo.model.includes('ROG Ally') || gpuInfo.model.includes('rog') || 
               gpuInfo.model.includes('ally') || gpuInfo.model.includes('Z2E') || 
               gpuInfo.model.includes('z2e') || gpuInfo.model.includes('Z1E') ||
               gpuInfo.model.includes('z1e')) {
             igpuModel = 'ROG Ally X (RDNA 3)';
             acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
-            igpuMemoryTotal = 16 * 1024;
-          }
-          // If Strix Halo was detected in GPU model, use that
-          else if (gpuInfo.model.includes('Strix Halo') || gpuInfo.model.includes('strix') || gpuInfo.model.includes('halo')) {
-            igpuModel = 'AMD Strix Halo (RDNA 3.5)';
-            acceleratorType = 'AMD Strix Halo (RDNA 3.5) - 40 RDNA 3.5 CUs';
             igpuMemoryTotal = 16 * 1024;
           } else {
             igpuModel = gpuInfo.model !== 'Unknown' ? `${gpuInfo.model} (iGPU)` : 'AMD Radeon Graphics (iGPU)';
@@ -513,33 +477,6 @@ function App() {
       console.warn('Accelerator detection error:', error);
     }
 
-    // FINAL OVERRIDE: Force iGPU for handheld gaming devices (ROG Ally X)
-    // This check happens at the very end to override any previous detection
-    const isHandheldDevice = (window.innerWidth >= 1280 && window.innerWidth <= 2560 && 
-                              window.innerHeight >= 720 && window.innerHeight <= 1440 &&
-                              ('ontouchstart' in window || navigator.maxTouchPoints > 0));
-    
-    // Get vendor from gpuInfo (defined outside try block)
-    const vendorLowerFinal = gpuInfo.vendor.toLowerCase();
-    
-    if (isHandheldDevice && vendorLowerFinal === 'amd') {
-      // Override to iGPU for AMD handheld devices (ROG Ally X)
-      activeAccelerator = 'iGPU';
-      igpuAvailable = true;
-      igpuModel = 'ROG Ally X (RDNA 3)';
-      acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
-      igpuMemoryTotal = 16 * 1024;
-      if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-        console.debug('FINAL OVERRIDE: Forcing iGPU for AMD handheld device', {
-          width: window.innerWidth,
-          height: window.innerHeight,
-          touchSupport: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
-          vendor: vendorLowerFinal,
-          gpuModel: gpuInfo.model,
-          gpuVendor: gpuInfo.vendor
-        });
-      }
-    }
 
     return {
       active: activeAccelerator,
