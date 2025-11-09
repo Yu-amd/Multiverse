@@ -635,6 +635,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     >
                       🔄 Reset Stats
                     </button>
+                    <button
+                      onClick={() => {
+                        const debugInfo = responseCache.getDebugInfo();
+                        console.log('🔍 Cache Debug Info:', debugInfo);
+                        alert(`Cache Debug Info logged to console!\n\nFull-context entries: ${debugInfo.fullContextCache.size}\nSimple entries: ${debugInfo.simpleCache.size}\nTotal hits: ${debugInfo.statistics.hits + debugInfo.statistics.simpleHits}\nHit rate: ${(debugInfo.statistics.hitRate * 100).toFixed(1)}%\n\nCheck browser console for detailed information.`);
+                      }}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--accent-color)',
+                        background: 'transparent',
+                        color: 'var(--accent-color)',
+                        cursor: 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: '500'
+                      }}
+                      title="Show detailed cache debug information in console"
+                    >
+                      🔍 Debug Info
+                    </button>
                   </div>
                   {cacheStats.oldestEntry && cacheStats.newestEntry && (
                     <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid var(--border-color)' }}>
@@ -643,6 +663,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </div>
                       <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
                         Newest entry: <span className="value">{new Date(cacheStats.newestEntry).toLocaleTimeString()}</span>
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                        💾 Persistence: <span className="value" style={{ color: 'var(--success-color)' }}>Enabled</span>
+                        <div style={{ fontSize: '0.75rem', marginTop: '4px', opacity: 0.8 }}>
+                          Cache is saved to localStorage and persists across page refreshes
+                        </div>
                       </div>
                     </div>
                   )}

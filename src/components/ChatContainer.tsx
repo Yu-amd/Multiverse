@@ -85,7 +85,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     if (chatMessagesRef.current) {
-      chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
+      // Find the scrollable container (VirtualizedMessages internal container)
+      const scrollContainer = chatMessagesRef.current.querySelector('[style*="overflow"]') as HTMLElement;
+      const targetElement = scrollContainer || chatMessagesRef.current;
+      
+      // Use requestAnimationFrame to ensure DOM is updated
+      requestAnimationFrame(() => {
+        if (targetElement) {
+          targetElement.scrollTop = targetElement.scrollHeight;
+        }
+      });
     }
   }, [messages, thinkingContent, responseContent]);
 
@@ -125,7 +134,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         </div>
       </div>
 
-      <div className="chat-messages" ref={chatMessagesRef} style={{ height: '100%', overflow: 'hidden' }}>
+      <div className="chat-messages" ref={chatMessagesRef} style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <VirtualizedMessages
           messages={messages}
           renderMessage={(message, index) => {

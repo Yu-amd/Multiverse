@@ -29,6 +29,9 @@ class ResponseCache {
   private hits: number = 0;
   private simpleHits: number = 0;
   private misses: number = 0;
+  private readonly STORAGE_KEY = 'multiverse_response_cache';
+  private readonly STATS_STORAGE_KEY = 'multiverse_cache_stats';
+  private persistenceEnabled: boolean = true;
 
   /**
    * Generate a simple cache key from last message only (for Q&A caching)
@@ -158,6 +161,7 @@ class ResponseCache {
     }
 
     this.simpleHits++;
+    this.saveStatsToLocalStorage();
     if (typeof window !== 'undefined' && import.meta.env?.DEV) {
       console.log('✅ Simple cache hit!', { 
         key, 
@@ -190,6 +194,7 @@ class ResponseCache {
 
     if (!entry) {
       this.misses++;
+      this.saveStatsToLocalStorage();
       if (typeof window !== 'undefined' && import.meta.env?.DEV) {
         const normalizedMessages = messages.map(m => ({
           role: m.role,
@@ -224,6 +229,7 @@ class ResponseCache {
     if (Date.now() > entry.expiresAt) {
       this.cache.delete(key);
       this.misses++;
+      this.saveStatsToLocalStorage();
       if (typeof window !== 'undefined' && import.meta.env?.DEV) {
         console.log('❌ Cache miss - entry expired', { 
           key, 
@@ -235,6 +241,7 @@ class ResponseCache {
     }
 
     this.hits++;
+    this.saveStatsToLocalStorage();
     if (typeof window !== 'undefined' && import.meta.env?.DEV) {
       console.log('✅ Cache hit!', { 
         key, 
@@ -270,6 +277,8 @@ class ResponseCache {
       expiresAt: now + (ttl || this.defaultTTL),
       key
     });
+    
+    this.saveToLocalStorage();
     
     if (typeof window !== 'undefined' && import.meta.env?.DEV) {
       console.log('💾 Response cached in simple cache', { 
@@ -369,6 +378,16 @@ class ResponseCache {
     this.hits = 0;
     this.simpleHits = 0;
     this.misses = 0;
+    
+    // Clear from localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(this.STORAGE_KEY);
+        localStorage.removeItem(this.STATS_STORAGE_KEY);
+      } catch (error) {
+        console.warn('Failed to clear cache from localStorage:', error);
+      }
+    }
   }
 
   /**
@@ -419,15 +438,244 @@ class ResponseCache {
     this.hits = 0;
     this.simpleHits = 0;
     this.misses = 0;
+    this.saveStatsToLocalStorage();
+  }
+
+  /**
+   * Save cache entries to localStorage (public method for manual saves)
+   */
+  saveToLocalStorage(): void {
+    if (!this.persistenceEnabled || typeof window === 'undefined') return;
+    
+    try {
+      const now = Date.now();
+      const cacheData: Array<{key: string, entry: CacheEntry<any>}> = [];
+      const simpleCacheData: Array<{key: string, entry: CacheEntry<any>}> = [];
+      
+      // Only save non-expired entries
+      for (const [key, entry] of this.cache.entries()) {
+        if (entry.expiresAt > now) {
+          cacheData.push({ key, entry });
+        }
+      }
+      
+      for (const [key, entry] of this.simpleCache.entries()) {
+        if (entry.expiresAt > now) {
+          simpleCacheData.push({ key, entry });
+        }
+      }
+      
+      const data = {
+        cache: cacheData,
+        simpleCache: simpleCacheData,
+        timestamp: now
+      };
+      
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data));
+      
+      if (import.meta.env?.DEV) {
+        console.debug('💾 Cache saved to localStorage', {
+          fullContextEntries: cacheData.length,
+          simpleEntries: simpleCacheData.length
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to save cache to localStorage:', error);
+    }
+  }
+
+  /**
+   * Load cache entries from localStorage
+   */
+  loadFromLocalStorage(): void {
+    if (!this.persistenceEnabled || typeof window === 'undefined') return;
+    
+    try {
+      const stored = localStorage.getItem(this.STORAGE_KEY);
+      if (!stored) {
+        if (import.meta.env?.DEV) {
+          console.debug('No cached data found in localStorage');
+        }
+        return;
+      }
+      
+      const data = JSON.parse(stored);
+      const now = Date.now();
+      let loadedFullContext = 0;
+      let loadedSimple = 0;
+      let expiredFullContext = 0;
+      let expiredSimple = 0;
+      
+      // Load full-context cache
+      if (data.cache && Array.isArray(data.cache)) {
+        for (const { key, entry } of data.cache) {
+          if (entry.expiresAt > now) {
+            this.cache.set(key, entry);
+            loadedFullContext++;
+          } else {
+            expiredFullContext++;
+          }
+        }
+      }
+      
+      // Load simple cache
+      if (data.simpleCache && Array.isArray(data.simpleCache)) {
+        for (const { key, entry } of data.simpleCache) {
+          if (entry.expiresAt > now) {
+            this.simpleCache.set(key, entry);
+            loadedSimple++;
+          } else {
+            expiredSimple++;
+          }
+        }
+      }
+      
+      // Load statistics
+      const statsStored = localStorage.getItem(this.STATS_STORAGE_KEY);
+      if (statsStored) {
+        try {
+          const stats = JSON.parse(statsStored);
+          this.hits = stats.hits || 0;
+          this.simpleHits = stats.simpleHits || 0;
+          this.misses = stats.misses || 0;
+        } catch (e) {
+          console.warn('Failed to load cache statistics:', e);
+        }
+      }
+      
+      if (import.meta.env?.DEV) {
+        console.log('✅ Cache loaded from localStorage', {
+          fullContextEntries: loadedFullContext,
+          simpleEntries: loadedSimple,
+          expiredFullContext,
+          expiredSimple,
+          age: data.timestamp ? Math.round((now - data.timestamp) / 1000) + 's' : 'unknown'
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to load cache from localStorage:', error);
+    }
+  }
+
+  /**
+   * Save statistics to localStorage
+   */
+  private saveStatsToLocalStorage(): void {
+    if (!this.persistenceEnabled || typeof window === 'undefined') return;
+    
+    try {
+      const stats = {
+        hits: this.hits,
+        simpleHits: this.simpleHits,
+        misses: this.misses,
+        timestamp: Date.now()
+      };
+      localStorage.setItem(this.STATS_STORAGE_KEY, JSON.stringify(stats));
+    } catch (error) {
+      console.warn('Failed to save cache statistics to localStorage:', error);
+    }
+  }
+
+  /**
+   * Get cache keys for debugging
+   */
+  getCacheKeys(): Array<{key: string, type: 'full-context' | 'simple', age: number, expiresAt: number}> {
+    const keys: Array<{key: string, type: 'full-context' | 'simple', age: number, expiresAt: number}> = [];
+    const now = Date.now();
+    
+    for (const [key, entry] of this.cache.entries()) {
+      keys.push({
+        key,
+        type: 'full-context',
+        age: now - entry.timestamp,
+        expiresAt: entry.expiresAt
+      });
+    }
+    
+    for (const [key, entry] of this.simpleCache.entries()) {
+      keys.push({
+        key,
+        type: 'simple',
+        age: now - entry.timestamp,
+        expiresAt: entry.expiresAt
+      });
+    }
+    
+    return keys.sort((a, b) => b.age - a.age); // Sort by age (newest first)
+  }
+
+  /**
+   * Get detailed cache information for debugging
+   */
+  getDebugInfo(): {
+    fullContextCache: { size: number; entries: Array<{key: string, age: number, expiresAt: number}> };
+    simpleCache: { size: number; entries: Array<{key: string, age: number, expiresAt: number}> };
+    statistics: { hits: number; simpleHits: number; misses: number; hitRate: number };
+    persistence: { enabled: boolean; localStorageAvailable: boolean };
+  } {
+    const now = Date.now();
+    
+    return {
+      fullContextCache: {
+        size: this.cache.size,
+        entries: Array.from(this.cache.entries()).map(([key, entry]) => ({
+          key,
+          age: now - entry.timestamp,
+          expiresAt: entry.expiresAt
+        })).sort((a, b) => b.age - a.age)
+      },
+      simpleCache: {
+        size: this.simpleCache.size,
+        entries: Array.from(this.simpleCache.entries()).map(([key, entry]) => ({
+          key,
+          age: now - entry.timestamp,
+          expiresAt: entry.expiresAt
+        })).sort((a, b) => b.age - a.age)
+      },
+      statistics: {
+        hits: this.hits,
+        simpleHits: this.simpleHits,
+        misses: this.misses,
+        hitRate: this.hits + this.simpleHits + this.misses > 0
+          ? (this.hits + this.simpleHits) / (this.hits + this.simpleHits + this.misses)
+          : 0
+      },
+      persistence: {
+        enabled: this.persistenceEnabled,
+        localStorageAvailable: typeof window !== 'undefined' && typeof localStorage !== 'undefined'
+      }
+    };
+  }
+
+  /**
+   * Enable or disable cache persistence
+   */
+  setPersistenceEnabled(enabled: boolean): void {
+    this.persistenceEnabled = enabled;
+    if (enabled && typeof window !== 'undefined') {
+      this.saveToLocalStorage();
+      this.saveStatsToLocalStorage();
+    }
   }
 }
 
 export const responseCache = new ResponseCache();
 
-// Clean up expired entries periodically
+// Load cache from localStorage on initialization
 if (typeof window !== 'undefined') {
+  // Load cache immediately
+  responseCache.loadFromLocalStorage();
+  
+  // Clean up expired entries periodically
   setInterval(() => {
     responseCache.clearExpired();
+    // Save after cleanup
+    responseCache.saveToLocalStorage();
   }, 60 * 1000); // Every minute
+  
+  // Save cache before page unload
+  window.addEventListener('beforeunload', () => {
+    responseCache.saveToLocalStorage();
+  });
 }
 
