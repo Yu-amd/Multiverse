@@ -1,6 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
+// Type definitions for browser APIs
+interface PerformanceMemory {
+  usedJSHeapSize: number;
+  totalJSHeapSize: number;
+  jsHeapSizeLimit: number;
+}
+
+interface BatteryManager extends EventTarget {
+  charging: boolean;
+  chargingTime: number;
+  dischargingTime: number;
+  level: number;
+}
+
+interface NavigatorWithBattery extends Navigator {
+  getBattery(): Promise<BatteryManager>;
+}
+
+interface GPUAdapter {
+  requestAdapterInfo(): Promise<{ vendor: string; architecture: string; device?: string; description?: string }>;
+}
+
+interface NavigatorWithGPU extends Navigator {
+  gpu?: {
+    requestAdapter(): Promise<GPUAdapter | null>;
+  };
+}
+
 // Import components
 import { ChatContainer } from './components/ChatContainer';
 import { CodePanel } from './components/CodePanel';
@@ -32,7 +60,8 @@ function App() {
     getSavedConversations,
     saveConversationToList,
     loadConversationFromList,
-    deleteConversation
+    deleteConversation,
+    renameConversation
   } = useConversation();
 
   const { theme, setTheme } = useTheme();
@@ -157,7 +186,7 @@ function App() {
     try {
       // Get CPU utilization from Performance API
       if ('performance' in window && 'memory' in performance) {
-        const memInfo = (performance as any).memory;
+        const memInfo = (performance as Performance & { memory?: PerformanceMemory }).memory;
         if (memInfo) {
           // Memory usage in MB
           metrics.ramUsage = memInfo.usedJSHeapSize / (1024 * 1024);
@@ -168,11 +197,11 @@ function App() {
       // Get battery information
       if ('getBattery' in navigator) {
         try {
-          const battery = await (navigator as any).getBattery();
+          const battery = await (navigator as NavigatorWithBattery).getBattery();
           metrics.batteryLevel = battery.level * 100;
           metrics.batteryCharging = battery.charging;
           metrics.batteryDischargingTime = battery.dischargingTime;
-        } catch (e) {
+        } catch {
           // Battery API not available or denied
           console.log('Battery API not available');
         }
@@ -194,14 +223,14 @@ function App() {
           const observer = new PerformanceObserver((list) => {
             const entries = list.getEntries();
             // Calculate CPU usage from long tasks
-            const longTasks = entries.filter((entry: any) => entry.entryType === 'longtask');
+            const longTasks = entries.filter((entry) => entry.entryType === 'longtask');
             if (longTasks.length > 0) {
               // Estimate CPU usage from long tasks
               metrics.cpuUtilization = Math.min(100, longTasks.length * 10);
             }
           });
           observer.observe({ entryTypes: ['longtask', 'measure'] });
-        } catch (e) {
+        } catch {
           console.log('Performance Observer not fully supported');
         }
       }
@@ -376,8 +405,9 @@ function App() {
 
     try {
       // Try WebGPU API first (most accurate)
-      if ('gpu' in navigator && navigator.gpu && typeof (navigator.gpu as any).requestAdapter === 'function') {
-        const adapter = await (navigator.gpu as any).requestAdapter();
+      const navWithGPU = navigator as NavigatorWithGPU;
+      if ('gpu' in navigator && navWithGPU.gpu && typeof navWithGPU.gpu.requestAdapter === 'function') {
+        const adapter = await navWithGPU.gpu.requestAdapter();
         if (adapter) {
           const info = await adapter.requestAdapterInfo();
           if (info) {
@@ -954,8 +984,17 @@ function App() {
         
         if (data.messages && Array.isArray(data.messages)) {
           // Convert timestamps if they're strings
-          const messages = data.messages.map((msg: any) => ({
+          interface ImportedMessage {
+            id?: string;
+            role: 'user' | 'assistant';
+            content: string;
+            timestamp?: string | Date;
+            edited?: boolean;
+            originalContent?: string;
+          }
+          const messages = (data.messages as ImportedMessage[]).map((msg) => ({
             ...msg,
+            id: msg.id || Date.now().toString() + Math.random().toString(36).substr(2, 9),
             timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
           }));
           
@@ -1100,6 +1139,7 @@ function App() {
             }
           }}
           deleteConversation={deleteConversation}
+          renameConversation={renameConversation}
           exportConversation={handleExportConversation}
           importConversation={handleImportConversation}
           isMobile={isMobile}

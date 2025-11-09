@@ -31,7 +31,7 @@ export const useConnection = (endpoint: string, apiKey: string) => {
             setConnectionStatus('online');
           }
         }
-      } catch (error) {
+      } catch {
         setConnectionStatus('offline');
       }
     };

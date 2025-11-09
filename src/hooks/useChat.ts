@@ -711,14 +711,12 @@ export const useChat = ({
         'in conclusion', 'so the answer', 'here\'s what i found'
       ];
 
-      let chunkCount = 0;
       let hasReceivedContent = false;
       
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        chunkCount++;
         const chunk = decoder.decode(value);
         const lines = chunk.split('\n').filter(line => line.trim() !== '');
 

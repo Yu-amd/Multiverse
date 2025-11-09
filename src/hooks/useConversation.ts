@@ -9,7 +9,15 @@ export const useConversation = () => {
         const conversation = JSON.parse(saved);
         const loadedMessages = conversation.messages || [];
         // Ensure all messages have IDs and edited flags
-        return loadedMessages.map((msg: any) => ({
+        interface LoadedMessage {
+          id?: string;
+          role: 'user' | 'assistant';
+          content: string;
+          timestamp?: string | Date;
+          edited?: boolean;
+          originalContent?: string;
+        }
+        return (loadedMessages as LoadedMessage[]).map((msg) => ({
           ...msg,
           id: msg.id || Date.now().toString() + Math.random().toString(36).substr(2, 9),
           edited: msg.edited || false,
@@ -106,6 +114,22 @@ export const useConversation = () => {
     }
   };
 
+  const renameConversation = (conversationId: string, newTitle: string) => {
+    try {
+      const conversations = getSavedConversations();
+      const updated = conversations.map(c => 
+        c.id === conversationId 
+          ? { ...c, title: newTitle, updatedAt: new Date().toISOString() }
+          : c
+      );
+      localStorage.setItem('multiverse-conversations', JSON.stringify(updated));
+      return true;
+    } catch (e) {
+      console.warn('Failed to rename conversation:', e);
+      return false;
+    }
+  };
+
   return {
     messages,
     setMessages,
@@ -113,7 +137,8 @@ export const useConversation = () => {
     getSavedConversations,
     saveConversationToList,
     loadConversationFromList,
-    deleteConversation
+    deleteConversation,
+    renameConversation
   };
 };
 

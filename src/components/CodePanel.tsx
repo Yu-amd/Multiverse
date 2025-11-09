@@ -387,14 +387,14 @@ while true; do
     fi
     
     # Add user message to conversation
-    CONVERSATION_HISTORY=\$(echo "$CONVERSATION_HISTORY" | jq --arg msg "$USER_INPUT" '. += [{"role": "user", "content": $msg}]')
+    CONVERSATION_HISTORY=$(echo "$CONVERSATION_HISTORY" | jq --arg msg "$USER_INPUT" '. += [{"role": "user", "content": $msg}]')
     
     # Make streaming API request
     echo -n "AI: "
-    RESPONSE=\$(curl -s -X POST "\${ENDPOINT}/v1/chat/completions" \\
+    RESPONSE=$(curl -s -X POST "${'$'}{ENDPOINT}/v1/chat/completions" \\
       -H "Content-Type: application/json"${apiKey ? ` \\\n      -H "Authorization: Bearer ${apiKey}"` : ''} \\
       -d "{
-        \\"messages\\": \$CONVERSATION_HISTORY,
+        \\"messages\\": $CONVERSATION_HISTORY,
         \\"temperature\\": ${temperature},
         \\"max_tokens\\": ${maxTokens},
         \\"top_p\\": ${topP},
@@ -402,9 +402,9 @@ while true; do
       }" \\
       --no-buffer | while IFS= read -r line; do
         if [[ "$line" == data:* ]]; then
-            data="\${line:6}"
+            data="${'$'}{line:6}"
             if [[ "$data" != "[DONE]" ]]; then
-                content=\$(echo "$data" | jq -r '.choices[0].delta.content // empty' 2>/dev/null)
+                content=$(echo "$data" | jq -r '.choices[0].delta.content // empty' 2>/dev/null)
                 if [ -n "$content" ] && [ "$content" != "null" ]; then
                     echo -n "$content"
                     echo -n "$content" >> /tmp/ai_response.txt
@@ -415,9 +415,9 @@ while true; do
     echo ""
     
     # Add AI response to conversation history
-    AI_RESPONSE=\$(cat /tmp/ai_response.txt 2>/dev/null || echo "")
+    AI_RESPONSE=$(cat /tmp/ai_response.txt 2>/dev/null || echo "")
     if [ -n "$AI_RESPONSE" ]; then
-        CONVERSATION_HISTORY=\$(echo "$CONVERSATION_HISTORY" | jq --arg msg "$AI_RESPONSE" '. += [{"role": "assistant", "content": $msg}]')
+        CONVERSATION_HISTORY=$(echo "$CONVERSATION_HISTORY" | jq --arg msg "$AI_RESPONSE" '. += [{"role": "assistant", "content": $msg}]')
         rm -f /tmp/ai_response.txt
     fi
 done
@@ -715,7 +715,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       const lineNumber = index + 1;
       
       // Escape HTML first
-      let escapedLine = line
+      const escapedLine = line
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
@@ -724,7 +724,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       const tokens: Array<{type: string, value: string}> = [];
 
       if (language === 'python') {
-        let remaining = escapedLine;
+        const remaining = escapedLine;
         
         const commentMatch = remaining.match(/#.*$/);
         if (commentMatch) {
@@ -761,7 +761,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }).join('');
         
       } else if (language === 'javascript') {
-        let remaining = escapedLine;
+        const remaining = escapedLine;
         const commentMatch = remaining.match(/\/\/.*$/);
         if (commentMatch) {
           const beforeComment = remaining.substring(0, commentMatch.index!);
@@ -797,7 +797,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }).join('');
         
       } else if (language === 'bash') {
-        let remaining = escapedLine;
+        const remaining = escapedLine;
         const commentMatch = remaining.match(/#.*$/);
         if (commentMatch) {
           const beforeComment = remaining.substring(0, commentMatch.index!);
@@ -833,7 +833,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }).join('');
         
       } else if (language === 'rust') {
-        let remaining = escapedLine;
+        const remaining = escapedLine;
         const commentMatch = remaining.match(/\/\/.*$/);
         if (commentMatch) {
           const beforeComment = remaining.substring(0, commentMatch.index!);
