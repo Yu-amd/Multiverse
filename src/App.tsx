@@ -37,6 +37,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ConversationHistoryModal } from './components/ConversationHistoryModal';
 import { ApiInfoModal } from './components/ApiInfoModal';
 import { ToastContainer } from './components/ToastContainer';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Import hooks
 import { useSettings } from './hooks/useSettings';
@@ -1023,139 +1024,155 @@ function App() {
   }, [theme]);
 
   return (
-    <div className="app-container">
-      <div className={`content-wrapper ${isROGAllyX ? 'rog-ally-layout' : isMobile ? 'mobile-layout' : isTablet ? 'tablet-layout' : 'desktop-layout'}`}>
-        <ChatContainer
-          messages={messages}
-          setMessages={setMessages}
-          customEndpoint={customEndpoint}
-          apiKey={apiKey}
-          temperature={temperature}
-          maxTokens={maxTokens}
-          topP={topP}
-          showToast={showToast}
-          recordMetrics={(promptLength, responseLength, totalTime, firstTokenLatency, tokensPerSecond) => {
-            setModelMetrics(prev => ({
-              ...prev,
-              promptToFirstToken: firstTokenLatency,
-              totalResponseTime: totalTime,
-              tokensPerSecond: tokensPerSecond,
-              tokensIn: promptLength,
-              tokensOut: responseLength,
-              promptLength: promptLength,
-              maxTokens: maxTokens,
-              contextUtilization: (promptLength / maxTokens) * 100,
-              activeRequests: 0 // Will be updated by ChatContainer
-            }));
-          }}
-          recordError={() => {
-            setModelMetrics(prev => ({
-              ...prev,
-              errorCount: prev.errorCount + 1
-            }));
-          }}
-          connectionStatus={connectionStatus}
-          showTimestamps={showTimestamps}
-          isMobile={isMobile}
-          isROGAllyX={isROGAllyX}
-          onClearChat={handleClearChat}
-          onOpenSettings={() => setShowSettings(true)}
-          onOpenDashboard={() => setShowDashboard(true)}
-          onOpenHistory={() => setShowConversationHistory(true)}
-          handleDeleteMessage={handleDeleteMessage}
-        />
-        
-        <CodePanel
-          messages={messages}
-          inputMessage={''}
-          customEndpoint={customEndpoint}
-          apiKey={apiKey}
-          temperature={temperature}
-          maxTokens={maxTokens}
-          topP={topP}
-          showToast={showToast}
-          onOpenApiInfo={() => setShowApiInfo(true)}
-        />
+    <ErrorBoundary>
+      <div className="app-container">
+        <div className={`content-wrapper ${isROGAllyX ? 'rog-ally-layout' : isMobile ? 'mobile-layout' : isTablet ? 'tablet-layout' : 'desktop-layout'}`}>
+          <ErrorBoundary>
+            <ChatContainer
+              messages={messages}
+              setMessages={setMessages}
+              customEndpoint={customEndpoint}
+              apiKey={apiKey}
+              temperature={temperature}
+              maxTokens={maxTokens}
+              topP={topP}
+              showToast={showToast}
+              recordMetrics={(promptLength, responseLength, totalTime, firstTokenLatency, tokensPerSecond) => {
+                setModelMetrics(prev => ({
+                  ...prev,
+                  promptToFirstToken: firstTokenLatency,
+                  totalResponseTime: totalTime,
+                  tokensPerSecond: tokensPerSecond,
+                  tokensIn: promptLength,
+                  tokensOut: responseLength,
+                  promptLength: promptLength,
+                  maxTokens: maxTokens,
+                  contextUtilization: (promptLength / maxTokens) * 100,
+                  activeRequests: 0 // Will be updated by ChatContainer
+                }));
+              }}
+              recordError={() => {
+                setModelMetrics(prev => ({
+                  ...prev,
+                  errorCount: prev.errorCount + 1
+                }));
+              }}
+              connectionStatus={connectionStatus}
+              showTimestamps={showTimestamps}
+              isMobile={isMobile}
+              isROGAllyX={isROGAllyX}
+              onClearChat={handleClearChat}
+              onOpenSettings={() => setShowSettings(true)}
+              onOpenDashboard={() => setShowDashboard(true)}
+              onOpenHistory={() => setShowConversationHistory(true)}
+              handleDeleteMessage={handleDeleteMessage}
+            />
+          </ErrorBoundary>
+          
+          <ErrorBoundary>
+            <CodePanel
+              messages={messages}
+              inputMessage={''}
+              customEndpoint={customEndpoint}
+              apiKey={apiKey}
+              temperature={temperature}
+              maxTokens={maxTokens}
+              topP={topP}
+              showToast={showToast}
+              onOpenApiInfo={() => setShowApiInfo(true)}
+            />
+          </ErrorBoundary>
 
-        <SettingsModal
-          showSettings={showSettings}
-          onClose={() => setShowSettings(false)}
-          selectedModel={selectedModel}
-          setSelectedModel={(model) => updateSettings({ selectedModel: model })}
-          customEndpoint={customEndpoint}
-          setCustomEndpoint={(endpoint) => updateSettings({ customEndpoint: endpoint })}
-          apiKey={apiKey}
-          setApiKey={(key) => updateSettings({ apiKey: key })}
-          temperature={temperature}
-          setTemperature={(temp) => updateSettings({ temperature: temp })}
-          maxTokens={maxTokens}
-          setMaxTokens={(tokens) => updateSettings({ maxTokens: tokens })}
-          topP={topP}
-          setTopP={(p) => updateSettings({ topP: p })}
-          showTimestamps={showTimestamps}
-          setShowTimestamps={setShowTimestamps}
-          theme={theme}
-          setTheme={setTheme}
-          isMobile={isMobile}
-          isTablet={isTablet}
-          isROGAllyX={isROGAllyX}
-        />
+          <ErrorBoundary>
+            <SettingsModal
+              showSettings={showSettings}
+              onClose={() => setShowSettings(false)}
+              selectedModel={selectedModel}
+              setSelectedModel={(model) => updateSettings({ selectedModel: model })}
+              customEndpoint={customEndpoint}
+              setCustomEndpoint={(endpoint) => updateSettings({ customEndpoint: endpoint })}
+              apiKey={apiKey}
+              setApiKey={(key) => updateSettings({ apiKey: key })}
+              temperature={temperature}
+              setTemperature={(temp) => updateSettings({ temperature: temp })}
+              maxTokens={maxTokens}
+              setMaxTokens={(tokens) => updateSettings({ maxTokens: tokens })}
+              topP={topP}
+              setTopP={(p) => updateSettings({ topP: p })}
+              showTimestamps={showTimestamps}
+              setShowTimestamps={setShowTimestamps}
+              theme={theme}
+              setTheme={setTheme}
+              isMobile={isMobile}
+              isTablet={isTablet}
+              isROGAllyX={isROGAllyX}
+            />
+          </ErrorBoundary>
 
-        <Dashboard
-          showDashboard={showDashboard}
-          onClose={() => setShowDashboard(false)}
-          modelMetrics={modelMetrics}
-          systemMetrics={systemMetrics}
-          compositeMetrics={compositeMetrics}
-          selectedModel={selectedModel}
-          customEndpoint={customEndpoint}
-          temperature={temperature}
-          maxTokens={maxTokens}
-          isMobile={isMobile}
-          isROGAllyX={isROGAllyX}
-        />
+          <ErrorBoundary>
+            <Dashboard
+              showDashboard={showDashboard}
+              onClose={() => setShowDashboard(false)}
+              modelMetrics={modelMetrics}
+              systemMetrics={systemMetrics}
+              compositeMetrics={compositeMetrics}
+              selectedModel={selectedModel}
+              customEndpoint={customEndpoint}
+              temperature={temperature}
+              maxTokens={maxTokens}
+              isMobile={isMobile}
+              isROGAllyX={isROGAllyX}
+            />
+          </ErrorBoundary>
 
-        <ConversationHistoryModal
-          showConversationHistory={showConversationHistory}
-          onClose={() => setShowConversationHistory(false)}
-          messages={messages}
-          setMessages={setMessages}
-          setSelectedModel={(model) => updateSettings({ selectedModel: model })}
-          setCustomEndpoint={(endpoint) => updateSettings({ customEndpoint: endpoint })}
-          getSavedConversations={getSavedConversations}
-          saveConversationToList={() => {
-            if (saveConversationToList(selectedModel, customEndpoint)) {
-              showToast('Conversation saved to history', 'success');
-            } else {
-              showToast('Failed to save conversation', 'error');
-            }
-          }}
-          loadConversationFromList={(conversationId: string) => {
-            const result = loadConversationFromList(conversationId);
-            if (result) {
-              setMessages(result.messages);
-              updateSettings({ selectedModel: result.model, customEndpoint: result.endpoint });
-              setShowConversationHistory(false);
-            }
-          }}
-          deleteConversation={deleteConversation}
-          renameConversation={renameConversation}
-          exportConversation={handleExportConversation}
-          importConversation={handleImportConversation}
-          selectedModel={selectedModel}
-          customEndpoint={customEndpoint}
-          isMobile={isMobile}
-        />
+          <ErrorBoundary>
+            <ConversationHistoryModal
+              showConversationHistory={showConversationHistory}
+              onClose={() => setShowConversationHistory(false)}
+              messages={messages}
+              setMessages={setMessages}
+              setSelectedModel={(model) => updateSettings({ selectedModel: model })}
+              setCustomEndpoint={(endpoint) => updateSettings({ customEndpoint: endpoint })}
+              getSavedConversations={getSavedConversations}
+              saveConversationToList={() => {
+                if (saveConversationToList(selectedModel, customEndpoint)) {
+                  showToast('Conversation saved to history', 'success');
+                } else {
+                  showToast('Failed to save conversation', 'error');
+                }
+              }}
+              loadConversationFromList={(conversationId: string) => {
+                const result = loadConversationFromList(conversationId);
+                if (result) {
+                  setMessages(result.messages);
+                  updateSettings({ selectedModel: result.model, customEndpoint: result.endpoint });
+                  setShowConversationHistory(false);
+                }
+              }}
+              deleteConversation={deleteConversation}
+              renameConversation={renameConversation}
+              exportConversation={handleExportConversation}
+              importConversation={handleImportConversation}
+              selectedModel={selectedModel}
+              customEndpoint={customEndpoint}
+              isMobile={isMobile}
+            />
+          </ErrorBoundary>
 
-        <ApiInfoModal
-          showApiInfo={showApiInfo}
-          onClose={() => setShowApiInfo(false)}
-          isMobile={isMobile}
-        />
+          <ErrorBoundary>
+            <ApiInfoModal
+              showApiInfo={showApiInfo}
+              onClose={() => setShowApiInfo(false)}
+              isMobile={isMobile}
+            />
+          </ErrorBoundary>
 
-        <ToastContainer toasts={toasts} removeToast={removeToast} />
+          <ErrorBoundary>
+            <ToastContainer toasts={toasts} removeToast={removeToast} />
+          </ErrorBoundary>
+        </div>
       </div>
-    </div>
+    </ErrorBoundary>
   );
 }
 

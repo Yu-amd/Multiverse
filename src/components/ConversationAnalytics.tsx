@@ -38,7 +38,7 @@ export const ConversationAnalytics: React.FC<ConversationAnalyticsProps> = ({
         
         <div style={{ 
           display: 'grid', 
-          gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)', 
+          gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', 
           gap: '15px' 
         }}>
           <div className="metric-card">
@@ -185,7 +185,7 @@ export const ConversationAnalytics: React.FC<ConversationAnalyticsProps> = ({
           </h3>
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)', 
+            gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', 
             gap: '15px' 
           }}>
             <div className="metric-card">

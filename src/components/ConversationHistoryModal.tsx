@@ -123,7 +123,7 @@ export const ConversationHistoryModal: React.FC<ConversationHistoryModalProps> =
         className="modal-content"
         style={{
           padding: isMobile ? '15px' : '20px',
-          maxWidth: isMobile ? '95%' : '600px',
+          maxWidth: isMobile ? '95%' : '1400px',
           width: '90%',
           maxHeight: isMobile ? '90vh' : '80vh'
         }}
