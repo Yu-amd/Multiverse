@@ -282,36 +282,6 @@ function App() {
     let igpuMemoryTotal = 0;
 
     try {
-      // Log detection details (always in dev, once in production)
-      if (import.meta.env.DEV) {
-        // Check all possible processor-related properties
-        const allProcessorInfo = {
-          cpuClass: (navigator as any).cpuClass,
-          oscpu: (navigator as any).oscpu,
-          platform: navigator.platform,
-          userAgent: navigator.userAgent,
-          hardwareConcurrency: navigator.hardwareConcurrency,
-          deviceMemory: (navigator as any).deviceMemory,
-          // Check if we can get more info from performance API
-          timing: performance.timing ? {
-            navigationStart: performance.timing.navigationStart,
-            loadEventEnd: performance.timing.loadEventEnd
-          } : null
-        };
-        
-        console.log('🔍 Detecting accelerators for:', gpuInfo);
-        console.log('  GPU Model:', gpuInfo.model);
-        console.log('  GPU Vendor:', gpuInfo.vendor);
-        console.log('  User Agent:', navigator.userAgent);
-        console.log('  Platform:', navigator.platform);
-        console.log('  Processor (cpuClass):', (navigator as any).cpuClass || 'Not available');
-        console.log('  Processor (oscpu):', (navigator as any).oscpu || 'Not available');
-        console.log('  Hardware Concurrency:', navigator.hardwareConcurrency);
-        console.log('  Device Memory:', (navigator as any).deviceMemory || 'Not available');
-        console.log('  Screen Size:', `${window.innerWidth}x${window.innerHeight}`);
-        console.log('  Touch Support:', 'ontouchstart' in window || navigator.maxTouchPoints > 0);
-        console.log('  All Processor Info:', allProcessorInfo);
-      }
       
       // Check if it's an integrated GPU (like Strix Halo or ROG Ally X)
       const gpuModelLower = gpuInfo.model.toLowerCase();
@@ -370,9 +340,21 @@ function App() {
                               processorLower.includes('ryzen ai 9 hx 370') ||
                               processorUpper.includes('RYZEN AI 9 HX 370');
       
-      // Also check hardware concurrency - ROG Ally X has 12 cores (24 threads)
+      // Also check hardware concurrency - ROG Ally X has 8 cores (16 threads)
       // This can be used as a secondary indicator
-      const hasAllyXCoreCount = navigator.hardwareConcurrency === 24 || navigator.hardwareConcurrency === 12;
+      const hasAllyXCoreCount = navigator.hardwareConcurrency === 16 || navigator.hardwareConcurrency === 8;
+      
+      // Check for ROG Xbox Ally X specifically (different from ROG Ally X)
+      const hasROGXboxAllyXIndicators = gpuModelLower.includes('xbox') ||
+                                        gpuModelLower.includes('rog xbox') ||
+                                        gpuModelLower.includes('rog xbox ally') ||
+                                        ua.includes('xbox') ||
+                                        ua.includes('rog xbox') ||
+                                        ua.includes('rog xbox ally') ||
+                                        plat.includes('xbox') ||
+                                        plat.includes('rog xbox') ||
+                                        processorLower.includes('xbox') ||
+                                        processorLower.includes('rog xbox');
       
       const hasROGAllyIndicators = gpuModelLower.includes('rog') || 
                                    gpuModelLower.includes('ally') ||
@@ -401,7 +383,9 @@ function App() {
                                    processorLower.includes('hx370') ||
                                    processorLower.includes('ryzen ai 9 hx 370') ||
                                    processorLower.includes('rog') ||
-                                   processorLower.includes('ally');
+                                   processorLower.includes('ally') ||
+                                   // ROG Xbox Ally X indicators
+                                   hasROGXboxAllyXIndicators;
       
       // Check for handheld gaming devices (ROG Ally X) - these are always iGPU
       // Also check if we have ROG Ally indicators (for WSL 2 / Windows detection)
@@ -432,22 +416,6 @@ function App() {
                           // Intel integrated graphics
                           (vendorLower === 'intel' && (gpuModelLower.includes('uhd') || gpuModelLower.includes('iris') || (gpuModelLower.includes('arc') && !gpuModelLower.includes('a770'))));
 
-      // Log detection details
-      if (import.meta.env.DEV) {
-        console.log('🔍 GPU Detection Details:');
-        console.log('  Is Integrated?', isIntegrated);
-        console.log('  GPU Model (lower):', gpuModelLower);
-        console.log('  Vendor (lower):', vendorLower);
-        console.log('  Is Known Discrete GPU?', isKnownDiscreteGPU);
-        console.log('  Is Unknown on Linux?', isUnknownOnLinux);
-        console.log('  Has ROG Ally Indicators?', hasROGAllyIndicators);
-        console.log('  Has Z1E Processor?', hasZ1EProcessor);
-        console.log('  Has Z2E Processor?', hasZ2EProcessor);
-        console.log('  Has Z2A Processor?', hasZ2AProcessor);
-        console.log('  Has Ally X Core Count (12/24)?', hasAllyXCoreCount);
-        console.log('  Hardware Concurrency:', navigator.hardwareConcurrency);
-        console.log('  Is Handheld Gaming Device?', isHandheldGamingDevice);
-      }
 
       if (isIntegrated) {
         igpuAvailable = true;
@@ -459,43 +427,22 @@ function App() {
           igpuModel = 'AMD Strix Halo (RDNA 3.5)';
           acceleratorType = 'AMD Strix Halo (RDNA 3.5) - 40 RDNA 3.5 CUs';
           igpuMemoryTotal = 16 * 1024; // Shared system memory
-          // Log detection
-          if (import.meta.env.DEV) {
-            console.log('✅ Detected Strix Halo as iGPU');
-          }
         }
-        // ROG Ally X (Z2E/Z2A processor) specific - check after Strix Halo
-        // Check for Z1E/Z2E/Z2A processor names (most reliable indicator)
-        // Also check for HX 370 (Ryzen AI 9 HX 370) and core count (12 cores/24 threads)
-        else if (gpuModelLower.includes('rog') || gpuModelLower.includes('ally') || 
+        // ROG Xbox Ally X (Z2A processor) specific - check after Strix Halo
+        // Check for ROG Xbox Ally X first (different from ROG Ally X)
+        // Also check for Z1E/Z2E/Z2A processor names (most reliable indicator)
+        // Also check for HX 370 (Ryzen AI 9 HX 370) and core count (8 cores/16 threads)
+        else if (hasROGXboxAllyXIndicators ||
+            gpuModelLower.includes('rog') || gpuModelLower.includes('ally') || 
             gpuModelLower.includes('z2e') || gpuModelLower.includes('z2a') ||
             gpuModelLower.includes('hx 370') || gpuModelLower.includes('hx370') ||
             gpuModelLower.includes('z1e') || gpuModelLower.includes('z1 extreme') || 
             hasZ1EProcessor || hasZ2EProcessor || hasZ2AProcessor ||
             (isWindows && hasTouchSupport && hasAllyXCoreCount) ||
             isHandheldGamingDevice) {
-          igpuModel = 'ROG Ally X (RDNA 3)';
-          acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
+          igpuModel = 'ROG Xbox Ally X (RDNA 3.5)';
+          acceleratorType = 'ROG Xbox Ally X (RDNA 3.5) - 16 Cores';
           igpuMemoryTotal = 16 * 1024; // Shared system memory
-          // Log detection
-          if (import.meta.env.DEV) {
-            console.log('✅ Detected ROG Ally X as iGPU', {
-              gpuModel: gpuInfo.model,
-              vendor: gpuInfo.vendor,
-              hasROGAllyIndicators,
-              hasZ1EProcessor,
-              hasZ2EProcessor,
-              hasZ2AProcessor,
-              hasAllyXCoreCount,
-              hardwareConcurrency: navigator.hardwareConcurrency,
-              processorInfo: processorInfo,
-              isHandheldGamingDevice,
-              userAgent: navigator.userAgent,
-              platform: navigator.platform,
-              screenSize: `${window.innerWidth}x${window.innerHeight}`,
-              touchSupport: 'ontouchstart' in window || navigator.maxTouchPoints > 0
-            });
-          }
         } else if (gpuModelLower.includes('rdna') || (vendorLower === 'amd' && !isKnownDiscreteGPU)) {
           // Other AMD RDNA iGPUs or any AMD GPU that's not a known discrete model
           if (gpuModelLower.includes('rdna')) {
@@ -530,40 +477,44 @@ function App() {
                                       ('ontouchstart' in window || navigator.maxTouchPoints > 0));
         const userAgentCheck = navigator.userAgent.toLowerCase();
         const platformCheck = navigator.platform.toLowerCase();
+        const hasROGXboxAllyXIndicatorsCheck = gpuModelLower.includes('xbox') ||
+                                               gpuModelLower.includes('rog xbox') ||
+                                               userAgentCheck.includes('xbox') ||
+                                               userAgentCheck.includes('rog xbox') ||
+                                               platformCheck.includes('xbox') ||
+                                               platformCheck.includes('rog xbox');
         const hasROGAllyIndicatorsCheck = gpuModelLower.includes('rog') || 
                                          gpuModelLower.includes('ally') ||
                                          gpuModelLower.includes('z2e') ||
+                                         gpuModelLower.includes('z2a') ||
                                          gpuModelLower.includes('z1e') ||
                                          userAgentCheck.includes('rog') ||
                                          userAgentCheck.includes('ally') ||
                                          userAgentCheck.includes('z2e') ||
+                                         userAgentCheck.includes('z2a') ||
                                          userAgentCheck.includes('z1e') ||
                                          platformCheck.includes('rog') ||
                                          platformCheck.includes('ally') ||
                                          platformCheck.includes('z2e') ||
+                                         platformCheck.includes('z2a') ||
                                          platformCheck.includes('z1e');
         const isHandheldGamingDeviceCheck = (isHandheldDeviceCheck && vendorLower === 'amd') || 
-                                           (hasROGAllyIndicatorsCheck && vendorLower === 'amd');
+                                           (hasROGAllyIndicatorsCheck && vendorLower === 'amd') ||
+                                           (hasROGXboxAllyXIndicatorsCheck && vendorLower === 'amd');
         
         if (isHandheldGamingDeviceCheck) {
-          // Handheld gaming devices (like ROG Ally X) are always iGPU
+          // Handheld gaming devices (like ROG Xbox Ally X) are always iGPU
           igpuAvailable = true;
           activeAccelerator = 'iGPU';
-          igpuModel = 'ROG Ally X (RDNA 3)';
-          acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
-          igpuMemoryTotal = 16 * 1024;
-          if (import.meta.env.DEV) {
-            console.log('✅ Detected handheld gaming device (ROG Ally X) - setting iGPU', { 
-              isHandheldDeviceCheck, 
-              hasROGAllyIndicatorsCheck,
-              vendor: vendorLower,
-              gpuModel: gpuInfo.model,
-              userAgent: navigator.userAgent,
-              platform: navigator.platform,
-              width: window.innerWidth, 
-              height: window.innerHeight 
-            });
+          // Check if it's ROG Xbox Ally X specifically
+          if (hasROGXboxAllyXIndicatorsCheck) {
+            igpuModel = 'ROG Xbox Ally X (RDNA 3.5)';
+            acceleratorType = 'ROG Xbox Ally X (RDNA 3.5) - 16 Cores';
+          } else {
+            igpuModel = 'ROG Ally X (RDNA 3.5)';
+            acceleratorType = 'ROG Ally X (RDNA 3.5) - 16 Cores';
           }
+          igpuMemoryTotal = 16 * 1024;
         }
         // If we're not sure and it's AMD, default to iGPU for laptops/handhelds
         // Also default to iGPU if unknown on Linux (most common case)
@@ -594,25 +545,13 @@ function App() {
               gpuInfo.model.includes('ally') || gpuInfo.model.includes('Z2E') || 
               gpuInfo.model.includes('z2e') || gpuInfo.model.includes('Z1E') ||
               gpuInfo.model.includes('z1e') || hasROGAllyInUA || hasROGAllyInPlatform) {
-            igpuModel = 'ROG Ally X (RDNA 3)';
-            acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
+            igpuModel = 'ROG Ally X (RDNA 3.5)';
+            acceleratorType = 'ROG Ally X (RDNA 3.5) - 16 Cores';
             igpuMemoryTotal = 16 * 1024;
           } else {
             igpuModel = gpuInfo.model !== 'Unknown' ? `${gpuInfo.model} (iGPU)` : 'AMD Radeon Graphics (iGPU)';
             acceleratorType = igpuModel;
             igpuMemoryTotal = 8 * 1024;
-          }
-          // Log detection
-          if (import.meta.env.DEV) {
-            console.log('✅ Defaulting to iGPU (AMD or Linux unknown):', igpuModel, {
-              gpuModel: gpuInfo.model,
-              vendor: gpuInfo.vendor,
-              hasROGAllyInUA,
-              hasROGAllyInPlatform,
-              userAgent: navigator.userAgent,
-              platform: navigator.platform,
-              isKnownDiscreteGPU
-            });
           }
         } else {
           // Only set as dGPU if we're CERTAIN it's discrete
@@ -637,8 +576,8 @@ function App() {
             
             if (hasROGAllyInUA || hasROGAllyInPlatform || 
                 gpuInfo.model.includes('rog') || gpuInfo.model.includes('ally')) {
-              igpuModel = 'ROG Ally X (RDNA 3)';
-              acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
+              igpuModel = 'ROG Ally X (RDNA 3.5)';
+              acceleratorType = 'ROG Ally X (RDNA 3.5) - 16 Cores';
               igpuMemoryTotal = 16 * 1024;
             } else {
               igpuModel = gpuInfo.model !== 'Unknown' ? `${gpuInfo.model} (iGPU)` : 'AMD Radeon Graphics (iGPU)';
@@ -646,44 +585,16 @@ function App() {
               igpuMemoryTotal = 8 * 1024;
             }
             
-            if (import.meta.env.DEV) {
-              console.log('✅ AMD system - defaulting to iGPU (not clearly discrete):', igpuModel, {
-                gpuModel: gpuInfo.model,
-                vendor: gpuInfo.vendor,
-                hasROGAllyInUA,
-                hasROGAllyInPlatform
-              });
-            }
           } else if (isLikelyHandheld) {
             // Windows + touch support + unknown vendor = likely handheld device (ROG Ally X)
             igpuAvailable = true;
             activeAccelerator = 'iGPU';
-            igpuModel = 'ROG Ally X (RDNA 3)';
-            acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
+            igpuModel = 'ROG Ally X (RDNA 3.5)';
+            acceleratorType = 'ROG Ally X (RDNA 3.5) - 16 Cores';
             igpuMemoryTotal = 16 * 1024;
-            
-            if (import.meta.env.DEV) {
-              console.log('✅ Windows + touch support + unknown vendor - detected as ROG Ally X (handheld)', {
-                gpuModel: gpuInfo.model,
-                vendor: gpuInfo.vendor,
-                isWindows: isWindowsCheck,
-                hasTouchSupport: hasTouchSupportCheck,
-                screenSize: `${window.innerWidth}x${window.innerHeight}`
-              });
-            }
           } else {
             activeAccelerator = 'dGPU';
             acceleratorType = gpuInfo.model !== 'Unknown' ? `${gpuInfo.vendor} ${gpuInfo.model}` : 'Discrete GPU';
-            // Log detection
-            if (import.meta.env.DEV) {
-              console.log('⚠️ Detected as discrete GPU:', acceleratorType, {
-                gpuModel: gpuInfo.model,
-                vendor: gpuInfo.vendor,
-                isWindows: isWindowsCheck,
-                hasTouchSupport: hasTouchSupportCheck,
-                isLikelyHandheld
-              });
-            }
           }
         }
       }
@@ -707,7 +618,7 @@ function App() {
       console.warn('Accelerator detection error:', error);
     }
 
-    const result = {
+    return {
       active: activeAccelerator,
       type: acceleratorType,
       npuAvailable,
@@ -718,13 +629,6 @@ function App() {
       igpuModel,
       igpuMemoryTotal
     };
-    
-    // Log final result
-    if (import.meta.env.DEV) {
-      console.log('🎯 Final Accelerator Detection Result:', result);
-    }
-    
-    return result;
   };
 
   // Real GPU detection using browser APIs
@@ -783,12 +687,12 @@ function App() {
                 // Detect ROG Ally X (Z2E processor) - check for ROG Ally, Ally X, or Z2E
                 if (allText.includes('rog') || allText.includes('ally') || allText.includes('z2e') || 
                     allText.includes('z1') || allText.includes('z1e') || allText.includes('z1 extreme')) {
-                  gpuModel = 'ROG Ally X (RDNA 3)';
+                  gpuModel = 'ROG Xbox Ally X (RDNA 3.5)';
                   gpuVendor = 'AMD';
-                  memoryTotal = 16 * 1024; // ROG Ally X typically has 16GB shared memory
+                  memoryTotal = 16 * 1024; // ROG Ally X has 16GB shared memory
                   memoryBandwidth = 120; // Typical for handheld gaming devices
-                  computeUnits = 12; // RDNA 3 architecture, typically 12 CUs
-                  clockSpeed = 2200; // Typical clock speed for handheld
+                  computeUnits = 16; // ROG Ally X has 16 cores (RDNA 3.5)
+                  clockSpeed = 2900; // Up to 2900 MHz boost frequency
                   // Only log once in development
                   if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
                     console.debug('Detected ROG Ally X!', { gpuModel, gpuVendor, memoryTotal, computeUnits });
@@ -951,12 +855,12 @@ function App() {
             userAgent.includes('z1e') || userAgent.includes('z1 extreme') ||
             platform.includes('rog') || platform.includes('ally') || platform.includes('z2e') ||
             platform.includes('z1e') || platform.includes('z1 extreme')) {
-          gpuModel = 'ROG Ally X (RDNA 3)';
+          gpuModel = 'ROG Ally X (RDNA 3.5)';
           gpuVendor = 'AMD';
-          memoryTotal = 16 * 1024; // ROG Ally X typically has 16GB shared memory
+          memoryTotal = 16 * 1024; // ROG Ally X has 16GB shared memory
           memoryBandwidth = 120; // Typical for handheld gaming devices
-          computeUnits = 12; // RDNA 3 architecture, typically 12 CUs
-          clockSpeed = 2200; // Typical clock speed for handheld
+          computeUnits = 16; // ROG Ally X has 16 cores (RDNA 3.5)
+          clockSpeed = 2900; // Up to 2900 MHz boost frequency
           // Only log once in development
           if (import.meta.env.DEV) {
             console.debug('Detected ROG Ally X via fallback');
