@@ -1142,6 +1142,8 @@ function App() {
           renameConversation={renameConversation}
           exportConversation={handleExportConversation}
           importConversation={handleImportConversation}
+          selectedModel={selectedModel}
+          customEndpoint={customEndpoint}
           isMobile={isMobile}
         />
 

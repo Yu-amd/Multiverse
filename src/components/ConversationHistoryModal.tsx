@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import type { Message, SavedConversation } from '../types';
+import { ConversationAnalytics } from './ConversationAnalytics';
 
 interface ConversationHistoryModalProps {
   showConversationHistory: boolean;
@@ -15,6 +16,8 @@ interface ConversationHistoryModalProps {
   renameConversation: (conversationId: string, newTitle: string) => boolean;
   exportConversation: (format: 'json' | 'markdown' | 'txt') => void;
   importConversation: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  selectedModel: string;
+  customEndpoint: string;
   isMobile: boolean;
 }
 
@@ -35,6 +38,8 @@ export const ConversationHistoryModal: React.FC<ConversationHistoryModalProps> =
   renameConversation,
   exportConversation,
   importConversation,
+  selectedModel,
+  customEndpoint,
   isMobile
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,6 +47,7 @@ export const ConversationHistoryModal: React.FC<ConversationHistoryModalProps> =
   const [filterModel, setFilterModel] = useState<FilterOption>('all');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [activeTab, setActiveTab] = useState<'conversations' | 'analytics'>('conversations');
 
   const allConversations = getSavedConversations();
 
@@ -133,8 +139,71 @@ export const ConversationHistoryModal: React.FC<ConversationHistoryModalProps> =
           </button>
         </div>
 
-        {/* Export/Import Buttons */}
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+        {/* Tabs */}
+        <div style={{ 
+          display: 'flex', 
+          gap: '10px', 
+          marginBottom: '20px',
+          borderBottom: '1px solid var(--border-color)'
+        }}>
+          <button
+            onClick={() => setActiveTab('conversations')}
+            style={{
+              padding: '10px 20px',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: activeTab === 'conversations' ? '2px solid var(--accent-color)' : '2px solid transparent',
+              color: activeTab === 'conversations' ? 'var(--accent-color)' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              fontSize: '0.9rem',
+              fontWeight: activeTab === 'conversations' ? 600 : 400,
+              transition: 'all 0.2s'
+            }}
+          >
+            💬 Conversations
+          </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            style={{
+              padding: '10px 20px',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: activeTab === 'analytics' ? '2px solid var(--accent-color)' : '2px solid transparent',
+              color: activeTab === 'analytics' ? 'var(--accent-color)' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              fontSize: '0.9rem',
+              fontWeight: activeTab === 'analytics' ? 600 : 400,
+              transition: 'all 0.2s'
+            }}
+          >
+            📊 Analytics
+          </button>
+        </div>
+
+        {/* Analytics Tab Content */}
+        {activeTab === 'analytics' && (
+          <div style={{ maxHeight: isMobile ? 'calc(90vh - 200px)' : 'calc(80vh - 200px)', overflowY: 'auto' }}>
+            <ConversationAnalytics
+              conversations={allConversations}
+              selectedConversation={messages.length > 0 ? {
+                id: 'current',
+                title: messages[0]?.content.substring(0, 50) || 'Current Conversation',
+                messages: messages,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                model: selectedModel,
+                endpoint: customEndpoint
+              } : null}
+              isMobile={isMobile}
+            />
+          </div>
+        )}
+
+        {/* Conversations Tab Content */}
+        {activeTab === 'conversations' && (
+          <>
+            {/* Export/Import Buttons */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
           <button
             onClick={() => exportConversation('json')}
             disabled={messages.length === 0}
@@ -469,6 +538,8 @@ export const ConversationHistoryModal: React.FC<ConversationHistoryModalProps> =
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
     </div>
   );
