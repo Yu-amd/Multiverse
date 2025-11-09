@@ -308,7 +308,12 @@ function App() {
       const isUnknownOnLinux = (gpuModelLower === 'unknown' || gpuModelLower === '') && 
                                navigator.platform.toLowerCase().includes('linux');
       
-      const isIntegrated = gpuModelLower.includes('strix') || 
+      const isIntegrated = gpuModelLower.includes('rog') ||
+                          gpuModelLower.includes('ally') ||
+                          gpuModelLower.includes('z2e') ||
+                          gpuModelLower.includes('z1e') ||
+                          gpuModelLower.includes('z1 extreme') ||
+                          gpuModelLower.includes('strix') || 
                           gpuModelLower.includes('halo') ||
                           gpuModelLower.includes('igpu') ||
                           gpuModelLower.includes('integrated') ||
@@ -330,16 +335,28 @@ function App() {
         igpuAvailable = true;
         activeAccelerator = 'iGPU';
         
+        // ROG Ally X (Z2E processor) specific
+        if (gpuModelLower.includes('rog') || gpuModelLower.includes('ally') || 
+            gpuModelLower.includes('z2e') || gpuModelLower.includes('z1e') ||
+            gpuModelLower.includes('z1 extreme')) {
+          igpuModel = 'ROG Ally X (RDNA 3)';
+          acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
+          igpuMemoryTotal = 16 * 1024; // Shared system memory
+          // Only log once in development
+          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+            console.debug('Detected ROG Ally X as iGPU');
+          }
+        }
         // AMD Strix Halo specific
-        if (gpuModelLower.includes('strix') || gpuModelLower.includes('halo') || 
+        else if (gpuModelLower.includes('strix') || gpuModelLower.includes('halo') || 
             (vendorLower === 'amd' && gpuModelLower.includes('rdna') && gpuModelLower.includes('3.5'))) {
           igpuModel = 'AMD Strix Halo (RDNA 3.5)';
           acceleratorType = 'AMD Strix Halo (RDNA 3.5) - 40 RDNA 3.5 CUs';
           igpuMemoryTotal = 16 * 1024; // Shared system memory
           // Only log once in development
-        if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-          console.debug('Detected Strix Halo as iGPU');
-        }
+          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+            console.debug('Detected Strix Halo as iGPU');
+          }
         } else if (gpuModelLower.includes('rdna') || (vendorLower === 'amd' && !isKnownDiscreteGPU)) {
           // Other AMD RDNA iGPUs or any AMD GPU that's not a known discrete model
           if (gpuModelLower.includes('rdna')) {
@@ -376,8 +393,17 @@ function App() {
           igpuAvailable = true;
           activeAccelerator = 'iGPU';
           
+          // If ROG Ally X was detected in GPU model, use that
+          if (gpuInfo.model.includes('ROG Ally') || gpuInfo.model.includes('rog') || 
+              gpuInfo.model.includes('ally') || gpuInfo.model.includes('Z2E') || 
+              gpuInfo.model.includes('z2e') || gpuInfo.model.includes('Z1E') ||
+              gpuInfo.model.includes('z1e')) {
+            igpuModel = 'ROG Ally X (RDNA 3)';
+            acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
+            igpuMemoryTotal = 16 * 1024;
+          }
           // If Strix Halo was detected in GPU model, use that
-          if (gpuInfo.model.includes('Strix Halo') || gpuInfo.model.includes('strix') || gpuInfo.model.includes('halo')) {
+          else if (gpuInfo.model.includes('Strix Halo') || gpuInfo.model.includes('strix') || gpuInfo.model.includes('halo')) {
             igpuModel = 'AMD Strix Halo (RDNA 3.5)';
             acceleratorType = 'AMD Strix Halo (RDNA 3.5) - 40 RDNA 3.5 CUs';
             igpuMemoryTotal = 16 * 1024;
@@ -484,6 +510,22 @@ function App() {
 
                 // Detect AMD Strix Halo - check multiple fields
                 const allText = `${vendorString} ${deviceString} ${description}`;
+                
+                // Detect ROG Ally X (Z2E processor) - check for ROG Ally, Ally X, or Z2E
+                if (allText.includes('rog') || allText.includes('ally') || allText.includes('z2e') || 
+                    allText.includes('z1') || allText.includes('z1e') || allText.includes('z1 extreme')) {
+                  gpuModel = 'ROG Ally X (RDNA 3)';
+                  gpuVendor = 'AMD';
+                  memoryTotal = 16 * 1024; // ROG Ally X typically has 16GB shared memory
+                  memoryBandwidth = 120; // Typical for handheld gaming devices
+                  computeUnits = 12; // RDNA 3 architecture, typically 12 CUs
+                  clockSpeed = 2200; // Typical clock speed for handheld
+                  // Only log once in development
+                  if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
+                    console.debug('Detected ROG Ally X!', { gpuModel, gpuVendor, memoryTotal, computeUnits });
+                  }
+                  return { model: gpuModel, vendor: gpuVendor, memoryTotal, memoryBandwidth, computeUnits, clockSpeed };
+                }
                 
                 // More specific Strix Halo detection
                 if (allText.includes('strix') || allText.includes('halo') || 
@@ -635,8 +677,24 @@ function App() {
           console.debug('Fallback detection:', { userAgent, platform, hardwareConcurrency });
         }
         
+        // Check for ROG Ally X (Z2E processor) in user agent or platform
+        if (userAgent.includes('rog') || userAgent.includes('ally') || userAgent.includes('z2e') || 
+            userAgent.includes('z1e') || userAgent.includes('z1 extreme') ||
+            platform.includes('rog') || platform.includes('ally') || platform.includes('z2e') ||
+            platform.includes('z1e') || platform.includes('z1 extreme')) {
+          gpuModel = 'ROG Ally X (RDNA 3)';
+          gpuVendor = 'AMD';
+          memoryTotal = 16 * 1024; // ROG Ally X typically has 16GB shared memory
+          memoryBandwidth = 120; // Typical for handheld gaming devices
+          computeUnits = 12; // RDNA 3 architecture, typically 12 CUs
+          clockSpeed = 2200; // Typical clock speed for handheld
+          // Only log once in development
+          if (import.meta.env.DEV) {
+            console.debug('Detected ROG Ally X via fallback');
+          }
+        }
         // Check for AMD Strix Halo in user agent or platform
-        if (userAgent.includes('strix') || userAgent.includes('halo') || 
+        else if (userAgent.includes('strix') || userAgent.includes('halo') || 
             platform.includes('strix') || platform.includes('halo')) {
           gpuModel = 'Strix Halo (RDNA 3.5)';
           gpuVendor = 'AMD';
