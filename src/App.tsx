@@ -291,6 +291,8 @@ function App() {
       // Check if it's an integrated GPU (like Strix Halo or ROG Ally X)
       const gpuModelLower = gpuInfo.model.toLowerCase();
       const vendorLower = gpuInfo.vendor.toLowerCase();
+      const ua = navigator.userAgent.toLowerCase();
+      const plat = navigator.platform.toLowerCase();
       
       // More comprehensive integrated GPU detection
       // For AMD: If it's not a known discrete GPU (RX series, MI series), assume it's iGPU
@@ -309,12 +311,31 @@ function App() {
                                navigator.platform.toLowerCase().includes('linux');
       
       // Also check screen dimensions for handheld gaming devices (ROG Ally X typically 1920x1080)
-      const isHandheldDevice = (window.innerWidth >= 1280 && window.innerWidth <= 2560 && 
-                                window.innerHeight >= 720 && window.innerHeight <= 1440 &&
+      // ROG Ally X can have various resolutions, so be more lenient
+      const isHandheldDevice = (window.innerWidth >= 800 && window.innerWidth <= 3000 && 
+                                window.innerHeight >= 600 && window.innerHeight <= 2000 &&
                                 ('ontouchstart' in window || navigator.maxTouchPoints > 0));
       
+      // Check for ROG Ally X indicators in user agent, platform, or GPU model
+      // This is important for WSL 2 where the browser runs on Windows
+      const hasROGAllyIndicators = gpuModelLower.includes('rog') || 
+                                   gpuModelLower.includes('ally') ||
+                                   gpuModelLower.includes('z2e') ||
+                                   gpuModelLower.includes('z1e') ||
+                                   gpuModelLower.includes('z1 extreme') ||
+                                   ua.includes('rog') ||
+                                   ua.includes('ally') ||
+                                   ua.includes('z2e') ||
+                                   ua.includes('z1e') ||
+                                   plat.includes('rog') ||
+                                   plat.includes('ally') ||
+                                   plat.includes('z2e') ||
+                                   plat.includes('z1e');
+      
       // Check for handheld gaming devices (ROG Ally X) - these are always iGPU
-      const isHandheldGamingDevice = isHandheldDevice && vendorLower === 'amd';
+      // Also check if we have ROG Ally indicators (for WSL 2 / Windows detection)
+      const isHandheldGamingDevice = (isHandheldDevice && vendorLower === 'amd') || 
+                                     (hasROGAllyIndicators && vendorLower === 'amd');
       
       const isIntegrated = gpuModelLower.includes('strix') || 
                           gpuModelLower.includes('halo') ||
@@ -395,12 +416,28 @@ function App() {
       } else {
         // Discrete GPU - only if we're certain it's discrete
         // Check for handheld gaming devices (ROG Ally X) - these are always iGPU
-        const isHandheldDeviceCheck = (window.innerWidth >= 1280 && window.innerWidth <= 2560 && 
-                                      window.innerHeight >= 720 && window.innerHeight <= 1440 &&
+        // Also check for ROG Ally indicators (important for WSL 2 / Windows)
+        const isHandheldDeviceCheck = (window.innerWidth >= 800 && window.innerWidth <= 3000 && 
+                                      window.innerHeight >= 600 && window.innerHeight <= 2000 &&
                                       ('ontouchstart' in window || navigator.maxTouchPoints > 0));
-        const isHandheldGamingDevice = isHandheldDeviceCheck && vendorLower === 'amd';
+        const userAgentCheck = navigator.userAgent.toLowerCase();
+        const platformCheck = navigator.platform.toLowerCase();
+        const hasROGAllyIndicatorsCheck = gpuModelLower.includes('rog') || 
+                                         gpuModelLower.includes('ally') ||
+                                         gpuModelLower.includes('z2e') ||
+                                         gpuModelLower.includes('z1e') ||
+                                         userAgentCheck.includes('rog') ||
+                                         userAgentCheck.includes('ally') ||
+                                         userAgentCheck.includes('z2e') ||
+                                         userAgentCheck.includes('z1e') ||
+                                         platformCheck.includes('rog') ||
+                                         platformCheck.includes('ally') ||
+                                         platformCheck.includes('z2e') ||
+                                         platformCheck.includes('z1e');
+        const isHandheldGamingDeviceCheck = (isHandheldDeviceCheck && vendorLower === 'amd') || 
+                                           (hasROGAllyIndicatorsCheck && vendorLower === 'amd');
         
-        if (isHandheldGamingDevice) {
+        if (isHandheldGamingDeviceCheck) {
           // Handheld gaming devices (like ROG Ally X) are always iGPU
           igpuAvailable = true;
           activeAccelerator = 'iGPU';
@@ -410,7 +447,11 @@ function App() {
           if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
             console.debug('Detected handheld gaming device (ROG Ally X) - setting iGPU', { 
               isHandheldDeviceCheck, 
-              vendor: vendorLower, 
+              hasROGAllyIndicatorsCheck,
+              vendor: vendorLower,
+              gpuModel: gpuInfo.model,
+              userAgent: navigator.userAgent,
+              platform: navigator.platform,
               width: window.innerWidth, 
               height: window.innerHeight 
             });
