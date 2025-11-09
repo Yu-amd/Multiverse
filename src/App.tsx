@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
-// import { basicMetricsCollector, BasicModelMetrics, BasicSystemMetrics, BasicCompositeMetrics } from './basic-metrics';
-
-// Import types - not needed directly in App.tsx anymore
 
 // Import components
 import { ChatContainer } from './components/ChatContainer';
@@ -609,35 +606,6 @@ function App() {
       chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
     }
   };
-
-  // Initialize metrics collection
-  // useEffect(() => {
-  //   console.log('Initializing basic metrics collection...');
-    
-  //   // Update metrics state
-  //   const updateMetrics = () => {
-  //     try {
-  //       const modelData = basicMetricsCollector.getModelMetrics();
-  //       const systemData = basicMetricsCollector.getSystemMetrics();
-  //       const compositeData = basicMetricsCollector.getCompositeMetrics();
-        
-  //       console.log('Updating metrics:', { modelData, systemData, compositeData });
-        
-  //       setModelMetrics(modelData);
-  //       setSystemMetrics(systemData);
-  //       setCompositeMetrics(compositeData);
-  //     } catch (error) {
-  //       console.error('Error updating metrics:', error);
-  //     }
-  //   };
-    
-  //   updateMetrics();
-  //   const interval = setInterval(updateMetrics, 2000);
-    
-  //   return () => {
-  //     clearInterval(interval);
-  //   };
-  // }, []);
 
   // Responsive design detection
   useEffect(() => {
