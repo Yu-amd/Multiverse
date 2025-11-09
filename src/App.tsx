@@ -459,6 +459,7 @@ function App() {
         }
         // If we're not sure and it's AMD, default to iGPU for laptops/handhelds
         // Also default to iGPU if unknown on Linux (most common case)
+        // IMPORTANT: For WSL 2 / Windows, if it's AMD and not clearly discrete, default to iGPU
         else if ((vendorLower === 'amd' && !isKnownDiscreteGPU) || 
             (isUnknownOnLinux && !isKnownDiscreteGPU)) {
           // Default to iGPU for AMD systems that aren't clearly discrete
@@ -466,17 +467,25 @@ function App() {
           igpuAvailable = true;
           activeAccelerator = 'iGPU';
           
+          // Check for ROG Ally indicators in user agent/platform (important for WSL 2)
+          const uaCheck = navigator.userAgent.toLowerCase();
+          const platCheck = navigator.platform.toLowerCase();
+          const hasROGAllyInUA = uaCheck.includes('rog') || uaCheck.includes('ally') ||
+                                uaCheck.includes('z2e') || uaCheck.includes('z1e');
+          const hasROGAllyInPlatform = platCheck.includes('rog') || platCheck.includes('ally') ||
+                                      platCheck.includes('z2e') || platCheck.includes('z1e');
+          
           // If Strix Halo was detected in GPU model, use that (check first)
           if (gpuInfo.model.includes('Strix Halo') || gpuInfo.model.includes('strix') || gpuInfo.model.includes('halo')) {
             igpuModel = 'AMD Strix Halo (RDNA 3.5)';
             acceleratorType = 'AMD Strix Halo (RDNA 3.5) - 40 RDNA 3.5 CUs';
             igpuMemoryTotal = 16 * 1024;
           }
-          // If ROG Ally X was detected in GPU model, use that
+          // If ROG Ally X was detected in GPU model, user agent, or platform, use that
           else if (gpuInfo.model.includes('ROG Ally') || gpuInfo.model.includes('rog') || 
               gpuInfo.model.includes('ally') || gpuInfo.model.includes('Z2E') || 
               gpuInfo.model.includes('z2e') || gpuInfo.model.includes('Z1E') ||
-              gpuInfo.model.includes('z1e')) {
+              gpuInfo.model.includes('z1e') || hasROGAllyInUA || hasROGAllyInPlatform) {
             igpuModel = 'ROG Ally X (RDNA 3)';
             acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
             igpuMemoryTotal = 16 * 1024;
@@ -487,14 +496,58 @@ function App() {
           }
           // Only log once in development
           if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-            console.debug('Defaulting to iGPU (AMD or Linux unknown):', igpuModel);
+            console.debug('Defaulting to iGPU (AMD or Linux unknown):', igpuModel, {
+              gpuModel: gpuInfo.model,
+              vendor: gpuInfo.vendor,
+              hasROGAllyInUA,
+              hasROGAllyInPlatform,
+              userAgent: navigator.userAgent,
+              platform: navigator.platform,
+              isKnownDiscreteGPU
+            });
           }
         } else {
-          activeAccelerator = 'dGPU';
-          acceleratorType = gpuInfo.model !== 'Unknown' ? `${gpuInfo.vendor} ${gpuInfo.model}` : 'Discrete GPU';
-          // Only log once in development
-          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-            console.debug('Detected as discrete GPU:', acceleratorType);
+          // Only set as dGPU if we're CERTAIN it's discrete
+          // If it's AMD and we're not sure, default to iGPU instead
+          if (vendorLower === 'amd' && !isKnownDiscreteGPU) {
+            // AMD but not clearly discrete - default to iGPU
+            igpuAvailable = true;
+            activeAccelerator = 'iGPU';
+            
+            // Check for ROG Ally indicators
+            const uaCheck = navigator.userAgent.toLowerCase();
+            const platCheck = navigator.platform.toLowerCase();
+            const hasROGAllyInUA = uaCheck.includes('rog') || uaCheck.includes('ally') ||
+                                  uaCheck.includes('z2e') || uaCheck.includes('z1e');
+            const hasROGAllyInPlatform = platCheck.includes('rog') || platCheck.includes('ally') ||
+                                        platCheck.includes('z2e') || platCheck.includes('z1e');
+            
+            if (hasROGAllyInUA || hasROGAllyInPlatform || 
+                gpuInfo.model.includes('rog') || gpuInfo.model.includes('ally')) {
+              igpuModel = 'ROG Ally X (RDNA 3)';
+              acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
+              igpuMemoryTotal = 16 * 1024;
+            } else {
+              igpuModel = gpuInfo.model !== 'Unknown' ? `${gpuInfo.model} (iGPU)` : 'AMD Radeon Graphics (iGPU)';
+              acceleratorType = igpuModel;
+              igpuMemoryTotal = 8 * 1024;
+            }
+            
+            if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+              console.debug('AMD system - defaulting to iGPU (not clearly discrete):', igpuModel, {
+                gpuModel: gpuInfo.model,
+                vendor: gpuInfo.vendor,
+                hasROGAllyInUA,
+                hasROGAllyInPlatform
+              });
+            }
+          } else {
+            activeAccelerator = 'dGPU';
+            acceleratorType = gpuInfo.model !== 'Unknown' ? `${gpuInfo.vendor} ${gpuInfo.model}` : 'Discrete GPU';
+            // Only log once in development
+            if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
+              console.debug('Detected as discrete GPU:', acceleratorType);
+            }
           }
         }
       }
