@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import type { Message } from '../types';
-import { getFriendlyErrorMessage } from '../utils/errorHandling';
+import { getFriendlyErrorMessage, isRetryableError } from '../utils/errorHandling';
 import { renderMarkdown } from '../utils/markdown';
 // import { responseCache } from '../utils/cache'; // Reserved for future non-streaming requests
 
@@ -311,12 +311,17 @@ export const useChat = ({
         const friendlyError = getFriendlyErrorMessage(error);
         showToast(friendlyError, 'error');
         
-        // Store error info for retry
-        setLastError({
-          messageId: errorMessageId,
-          userMessage: newMessage,
-          error: error instanceof Error ? error : new Error(String(error)),
-        });
+        // Store error info for retry (only if retryable)
+        if (isRetryableError(error)) {
+          setLastError({
+            messageId: errorMessageId,
+            userMessage: newMessage,
+            error: error instanceof Error ? error : new Error(String(error)),
+          });
+        } else {
+          // Clear last error if not retryable
+          setLastError(null);
+        }
       }
       
       // Record error metrics
