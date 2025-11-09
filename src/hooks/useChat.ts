@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import type { Message } from '../types';
 import { getFriendlyErrorMessage } from '../utils/errorHandling';
 import { renderMarkdown } from '../utils/markdown';
+// import { responseCache } from '../utils/cache'; // Reserved for future non-streaming requests
 
 interface UseChatProps {
   messages: Message[];
@@ -82,6 +83,10 @@ export const useChat = ({
         top_p: topP,
         stream: true,
       };
+
+      // Check cache first (only for non-streaming requests, but we'll skip for streaming)
+      // For streaming, we don't cache as it's real-time
+      // Cache is useful for non-streaming requests if we add that feature later
 
       console.log('Sending request to:', endpoint);
       console.log('Request payload:', request);

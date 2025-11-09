@@ -45,6 +45,7 @@ import { useConversation } from './hooks/useConversation';
 import { useTheme } from './hooks/useTheme';
 import { useToast } from './hooks/useToast';
 import { useConnection } from './hooks/useConnection';
+import { debounce } from './utils/debounce';
 import { useChat } from './hooks/useChat';
 
 // Import utilities - not needed directly in App.tsx anymore
@@ -820,7 +821,8 @@ function App() {
 
     performDetection();
 
-    const interval = setInterval(async () => {
+    // Debounced metrics update function
+    const debouncedUpdateMetrics = debounce(async () => {
       try {
         const detectedGpu = await detectGPU();
         const detectedAccelerators = await detectAccelerators(detectedGpu);
@@ -880,10 +882,14 @@ function App() {
       } catch (error) {
         console.error('Hardware detection error:', error);
       }
-    }, 3000); // Update every 3 seconds
+    }, 500); // Debounce to 500ms
 
-    // Update composite metrics based on current model metrics and real-time system data
-    const compositeInterval = setInterval(async () => {
+    const interval = setInterval(() => {
+      debouncedUpdateMetrics();
+    }, 3000); // Trigger every 3 seconds, but debounced to 500ms
+
+    // Debounced composite metrics update
+    const debouncedUpdateCompositeMetrics = debounce(async () => {
       const realTimeMetrics = await collectRealTimeMetrics();
       const powerDraw = realTimeMetrics.batteryDischargingTime !== Infinity && realTimeMetrics.batteryDischargingTime > 0
         ? Math.min(120, 100 / (realTimeMetrics.batteryDischargingTime / 3600))
@@ -895,7 +901,11 @@ function App() {
         efficiencyRating: Math.min(10, modelMetrics.tokensPerSecond / 10 + (realTimeMetrics.cpuUtilization / 20)),
         performanceTrend: modelMetrics.tokensPerSecond > 5 ? 'Improving' : 'Stable'
       }));
-    }, 3000);
+    }, 500); // Debounce to 500ms
+
+    const compositeInterval = setInterval(() => {
+      debouncedUpdateCompositeMetrics();
+    }, 2000); // Trigger every 2 seconds, but debounced to 500ms
 
     return () => {
       mounted = false;
