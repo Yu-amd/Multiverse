@@ -284,16 +284,33 @@ function App() {
     try {
       // Log detection details (always in dev, once in production)
       if (import.meta.env.DEV) {
-        const processorInfo = (navigator as any).cpuClass || (navigator as any).oscpu || 'Not available';
+        // Check all possible processor-related properties
+        const allProcessorInfo = {
+          cpuClass: (navigator as any).cpuClass,
+          oscpu: (navigator as any).oscpu,
+          platform: navigator.platform,
+          userAgent: navigator.userAgent,
+          hardwareConcurrency: navigator.hardwareConcurrency,
+          deviceMemory: (navigator as any).deviceMemory,
+          // Check if we can get more info from performance API
+          timing: performance.timing ? {
+            navigationStart: performance.timing.navigationStart,
+            loadEventEnd: performance.timing.loadEventEnd
+          } : null
+        };
+        
         console.log('🔍 Detecting accelerators for:', gpuInfo);
         console.log('  GPU Model:', gpuInfo.model);
         console.log('  GPU Vendor:', gpuInfo.vendor);
         console.log('  User Agent:', navigator.userAgent);
         console.log('  Platform:', navigator.platform);
-        console.log('  Processor:', processorInfo);
+        console.log('  Processor (cpuClass):', (navigator as any).cpuClass || 'Not available');
+        console.log('  Processor (oscpu):', (navigator as any).oscpu || 'Not available');
         console.log('  Hardware Concurrency:', navigator.hardwareConcurrency);
+        console.log('  Device Memory:', (navigator as any).deviceMemory || 'Not available');
         console.log('  Screen Size:', `${window.innerWidth}x${window.innerHeight}`);
         console.log('  Touch Support:', 'ontouchstart' in window || navigator.maxTouchPoints > 0);
+        console.log('  All Processor Info:', allProcessorInfo);
       }
       
       // Check if it's an integrated GPU (like Strix Halo or ROG Ally X)
@@ -335,42 +352,65 @@ function App() {
       const processorLower = processorInfo.toLowerCase();
       const processorUpper = processorInfo.toUpperCase();
       
-      // Check for Z1E/Z2E processor names (most reliable indicator)
-      // These might appear as Z1E, Z2E, z1e, z2e, Z1 Extreme, etc.
+      // Check for Z1E/Z2E/Z2A processor names (most reliable indicator)
+      // These might appear as Z1E, Z2E, Z2A, z1e, z2e, z2a, Z1 Extreme, etc.
+      // Also check for HX 370 (Ryzen AI 9 HX 370 is part of Z2A series)
       const hasZ1EProcessor = processorLower.includes('z1e') || 
                               processorLower.includes('z1 extreme') ||
                               processorUpper.includes('Z1E') ||
                               processorUpper.includes('Z1 EXTREME');
       const hasZ2EProcessor = processorLower.includes('z2e') || 
                               processorUpper.includes('Z2E');
+      const hasZ2AProcessor = processorLower.includes('z2a') || 
+                              processorUpper.includes('Z2A') ||
+                              processorLower.includes('hx 370') ||
+                              processorLower.includes('hx370') ||
+                              processorUpper.includes('HX 370') ||
+                              processorUpper.includes('HX370') ||
+                              processorLower.includes('ryzen ai 9 hx 370') ||
+                              processorUpper.includes('RYZEN AI 9 HX 370');
+      
+      // Also check hardware concurrency - ROG Ally X has 12 cores (24 threads)
+      // This can be used as a secondary indicator
+      const hasAllyXCoreCount = navigator.hardwareConcurrency === 24 || navigator.hardwareConcurrency === 12;
       
       const hasROGAllyIndicators = gpuModelLower.includes('rog') || 
                                    gpuModelLower.includes('ally') ||
                                    gpuModelLower.includes('z2e') ||
+                                   gpuModelLower.includes('z2a') ||
                                    gpuModelLower.includes('z1e') ||
                                    gpuModelLower.includes('z1 extreme') ||
                                    ua.includes('rog') ||
                                    ua.includes('ally') ||
                                    ua.includes('z2e') ||
+                                   ua.includes('z2a') ||
                                    ua.includes('z1e') ||
                                    ua.includes('z1 extreme') ||
                                    plat.includes('rog') ||
                                    plat.includes('ally') ||
                                    plat.includes('z2e') ||
+                                   plat.includes('z2a') ||
                                    plat.includes('z1e') ||
                                    plat.includes('z1 extreme') ||
                                    // Processor name checks (case-insensitive)
                                    hasZ1EProcessor ||
                                    hasZ2EProcessor ||
+                                   hasZ2AProcessor ||
+                                   // Also check for HX 370 in processor name
+                                   processorLower.includes('hx 370') ||
+                                   processorLower.includes('hx370') ||
+                                   processorLower.includes('ryzen ai 9 hx 370') ||
                                    processorLower.includes('rog') ||
                                    processorLower.includes('ally');
       
       // Check for handheld gaming devices (ROG Ally X) - these are always iGPU
       // Also check if we have ROG Ally indicators (for WSL 2 / Windows detection)
       // IMPORTANT: If Windows + touch support + unknown vendor, likely ROG Ally X (handheld device)
+      // Also check for 12 cores (24 threads) which is characteristic of ROG Ally X
       const isHandheldGamingDevice = (isHandheldDevice && (vendorLower === 'amd' || vendorLower === 'unknown')) || 
                                      (hasROGAllyIndicators && (vendorLower === 'amd' || vendorLower === 'unknown')) ||
-                                     (isWindows && hasTouchSupport && vendorLower === 'unknown' && !isKnownDiscreteGPU);
+                                     (isWindows && hasTouchSupport && vendorLower === 'unknown' && !isKnownDiscreteGPU) ||
+                                     (isWindows && hasTouchSupport && hasAllyXCoreCount && vendorLower === 'unknown');
       
       const isIntegrated = gpuModelLower.includes('strix') || 
                           gpuModelLower.includes('halo') ||
@@ -401,6 +441,11 @@ function App() {
         console.log('  Is Known Discrete GPU?', isKnownDiscreteGPU);
         console.log('  Is Unknown on Linux?', isUnknownOnLinux);
         console.log('  Has ROG Ally Indicators?', hasROGAllyIndicators);
+        console.log('  Has Z1E Processor?', hasZ1EProcessor);
+        console.log('  Has Z2E Processor?', hasZ2EProcessor);
+        console.log('  Has Z2A Processor?', hasZ2AProcessor);
+        console.log('  Has Ally X Core Count (12/24)?', hasAllyXCoreCount);
+        console.log('  Hardware Concurrency:', navigator.hardwareConcurrency);
         console.log('  Is Handheld Gaming Device?', isHandheldGamingDevice);
       }
 
@@ -419,12 +464,15 @@ function App() {
             console.log('✅ Detected Strix Halo as iGPU');
           }
         }
-        // ROG Ally X (Z2E processor) specific - check after Strix Halo
-        // Check for Z1E/Z2E processor names (most reliable indicator)
+        // ROG Ally X (Z2E/Z2A processor) specific - check after Strix Halo
+        // Check for Z1E/Z2E/Z2A processor names (most reliable indicator)
+        // Also check for HX 370 (Ryzen AI 9 HX 370) and core count (12 cores/24 threads)
         else if (gpuModelLower.includes('rog') || gpuModelLower.includes('ally') || 
-            gpuModelLower.includes('z2e') || gpuModelLower.includes('z1e') ||
-            gpuModelLower.includes('z1 extreme') || 
-            hasZ1EProcessor || hasZ2EProcessor ||
+            gpuModelLower.includes('z2e') || gpuModelLower.includes('z2a') ||
+            gpuModelLower.includes('hx 370') || gpuModelLower.includes('hx370') ||
+            gpuModelLower.includes('z1e') || gpuModelLower.includes('z1 extreme') || 
+            hasZ1EProcessor || hasZ2EProcessor || hasZ2AProcessor ||
+            (isWindows && hasTouchSupport && hasAllyXCoreCount) ||
             isHandheldGamingDevice) {
           igpuModel = 'ROG Ally X (RDNA 3)';
           acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
@@ -437,6 +485,9 @@ function App() {
               hasROGAllyIndicators,
               hasZ1EProcessor,
               hasZ2EProcessor,
+              hasZ2AProcessor,
+              hasAllyXCoreCount,
+              hardwareConcurrency: navigator.hardwareConcurrency,
               processorInfo: processorInfo,
               isHandheldGamingDevice,
               userAgent: navigator.userAgent,
