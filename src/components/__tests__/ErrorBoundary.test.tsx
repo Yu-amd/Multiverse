@@ -116,5 +116,57 @@ describe('ErrorBoundary', () => {
     // Error boundary should reset and show children
     expect(screen.queryByText(/Something went wrong/i)).not.toBeInTheDocument();
   });
+
+  it('should handle multiple errors gracefully', () => {
+    const { rerender } = render(
+      <ErrorBoundary>
+        <ThrowError shouldThrow={true} />
+      </ErrorBoundary>
+    );
+
+    expect(screen.getByText(/Something went wrong/i)).toBeInTheDocument();
+
+    // Reset and throw another error
+    const tryAgainButton = screen.getByText(/Try Again/i);
+    tryAgainButton.click();
+
+    rerender(
+      <ErrorBoundary>
+        <ThrowError shouldThrow={true} />
+      </ErrorBoundary>
+    );
+
+    // Should still show error UI
+    expect(screen.getByText(/Something went wrong/i)).toBeInTheDocument();
+  });
+
+  it('should log multiple errors to localStorage', () => {
+    localStorage.clear();
+    
+    const { rerender } = render(
+      <ErrorBoundary>
+        <ThrowError shouldThrow={true} />
+      </ErrorBoundary>
+    );
+
+    // First error
+    let errorLogs = JSON.parse(localStorage.getItem('errorLogs') || '[]');
+    expect(errorLogs.length).toBeGreaterThan(0);
+
+    // Reset and throw another error
+    const tryAgainButton = screen.getByText(/Try Again/i);
+    tryAgainButton.click();
+
+    rerender(
+      <ErrorBoundary>
+        <ThrowError shouldThrow={true} />
+      </ErrorBoundary>
+    );
+
+    // Should have multiple errors (up to 10)
+    errorLogs = JSON.parse(localStorage.getItem('errorLogs') || '[]');
+    expect(errorLogs.length).toBeGreaterThan(1);
+    expect(errorLogs.length).toBeLessThanOrEqual(10);
+  });
 });
 

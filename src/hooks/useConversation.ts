@@ -47,7 +47,13 @@ export const useConversation = () => {
 
   const clearConversation = () => {
     setMessages([]);
-    localStorage.removeItem('multiverse-current-conversation');
+    // Note: localStorage will be cleared by useEffect when messages becomes empty
+    // But we also explicitly remove it to ensure it's gone immediately
+    try {
+      localStorage.removeItem('multiverse-current-conversation');
+    } catch (e) {
+      console.warn('Failed to clear conversation from localStorage:', e);
+    }
   };
 
   const getSavedConversations = (): SavedConversation[] => {
