@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Metrics Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .connected { background: #238636; }
+        .disconnected { background: #da3633; }
+        .metrics { background: #161b22; padding: 15px; border-radius: 4px; margin: 10px 0; }
+        pre { background: #0d1117; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; background: #238636; color: white; border: none; border-radius: 4px; }
+        button:hover { background: #2ea043; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Metrics Test</h1>
+    <div id="status" class="status disconnected">Disconnected</div>
+    <button onclick="connect()">Connect</button>
+    <button onclick="disconnect()">Disconnect</button>
+    <div id="metrics" class="metrics">
+        <h3>Metrics:</h3>
+        <pre id="output">Waiting for connection...</pre>
+    </div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                console.log('Already connected');
+                return;
+            }
+
+            const statusEl = document.getElementById('status');
+            const outputEl = document.getElementById('output');
+            
+            statusEl.textContent = 'Connecting...';
+            statusEl.className = 'status disconnected';
+            outputEl.textContent = 'Connecting to ws://localhost:8000/ws/metrics...';
+
+            ws = new WebSocket('ws://localhost:8000/ws/metrics');
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                statusEl.textContent = 'Connected ✓';
+                statusEl.className = 'status connected';
+                outputEl.textContent = 'Connected! Waiting for metrics...\n';
+                messageCount = 0;
+            };
+
+            ws.onmessage = (event) => {
+                messageCount++;
+                const data = JSON.parse(event.data);
+                const timestamp = new Date(data.timestamp).toLocaleTimeString();
+                outputEl.textContent = `Message #${messageCount} (${timestamp}):\n${JSON.stringify(data, null, 2)}`;
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                statusEl.textContent = 'Error occurred';
+                statusEl.className = 'status disconnected';
+                outputEl.textContent = 'Error: ' + error;
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'status disconnected';
+                outputEl.textContent = 'Connection closed.';
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        // Auto-connect on load
+        window.onload = () => {
+            setTimeout(connect, 500);
+        };
+    </script>
+</body>
+</html>
