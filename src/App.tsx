@@ -317,9 +317,12 @@ function App() {
       
       // Also check screen dimensions for handheld gaming devices (ROG Ally X typically 1920x1080)
       // ROG Ally X can have various resolutions, so be more lenient
-      const isHandheldDevice = (window.innerWidth >= 800 && window.innerWidth <= 3000 && 
-                                window.innerHeight >= 600 && window.innerHeight <= 2000 &&
-                                ('ontouchstart' in window || navigator.maxTouchPoints > 0));
+      // Also check for touch support on Windows (ROG Ally X has touch screen)
+      const hasTouchSupport = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      const isWindows = plat.includes('win') || ua.includes('windows');
+      const isHandheldDevice = (window.innerWidth >= 600 && window.innerWidth <= 3000 && 
+                                window.innerHeight >= 400 && window.innerHeight <= 2000 &&
+                                hasTouchSupport);
       
       // Check for ROG Ally X indicators in user agent, platform, or GPU model
       // This is important for WSL 2 where the browser runs on Windows
@@ -339,8 +342,10 @@ function App() {
       
       // Check for handheld gaming devices (ROG Ally X) - these are always iGPU
       // Also check if we have ROG Ally indicators (for WSL 2 / Windows detection)
-      const isHandheldGamingDevice = (isHandheldDevice && vendorLower === 'amd') || 
-                                     (hasROGAllyIndicators && vendorLower === 'amd');
+      // IMPORTANT: If Windows + touch support + unknown vendor, likely ROG Ally X (handheld device)
+      const isHandheldGamingDevice = (isHandheldDevice && (vendorLower === 'amd' || vendorLower === 'unknown')) || 
+                                     (hasROGAllyIndicators && (vendorLower === 'amd' || vendorLower === 'unknown')) ||
+                                     (isWindows && hasTouchSupport && vendorLower === 'unknown' && !isKnownDiscreteGPU);
       
       const isIntegrated = gpuModelLower.includes('strix') || 
                           gpuModelLower.includes('halo') ||
@@ -530,14 +535,19 @@ function App() {
         } else {
           // Only set as dGPU if we're CERTAIN it's discrete
           // If it's AMD and we're not sure, default to iGPU instead
+          // IMPORTANT: If Windows + touch support + unknown vendor, likely handheld (ROG Ally X)
+          const uaCheck = navigator.userAgent.toLowerCase();
+          const platCheck = navigator.platform.toLowerCase();
+          const hasTouchSupportCheck = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+          const isWindowsCheck = platCheck.includes('win') || uaCheck.includes('windows');
+          const isLikelyHandheld = isWindowsCheck && hasTouchSupportCheck && vendorLower === 'unknown' && !isKnownDiscreteGPU;
+          
           if (vendorLower === 'amd' && !isKnownDiscreteGPU) {
             // AMD but not clearly discrete - default to iGPU
             igpuAvailable = true;
             activeAccelerator = 'iGPU';
             
             // Check for ROG Ally indicators
-            const uaCheck = navigator.userAgent.toLowerCase();
-            const platCheck = navigator.platform.toLowerCase();
             const hasROGAllyInUA = uaCheck.includes('rog') || uaCheck.includes('ally') ||
                                   uaCheck.includes('z2e') || uaCheck.includes('z1e');
             const hasROGAllyInPlatform = platCheck.includes('rog') || platCheck.includes('ally') ||
@@ -562,12 +572,35 @@ function App() {
                 hasROGAllyInPlatform
               });
             }
+          } else if (isLikelyHandheld) {
+            // Windows + touch support + unknown vendor = likely handheld device (ROG Ally X)
+            igpuAvailable = true;
+            activeAccelerator = 'iGPU';
+            igpuModel = 'ROG Ally X (RDNA 3)';
+            acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
+            igpuMemoryTotal = 16 * 1024;
+            
+            if (import.meta.env.DEV) {
+              console.log('✅ Windows + touch support + unknown vendor - detected as ROG Ally X (handheld)', {
+                gpuModel: gpuInfo.model,
+                vendor: gpuInfo.vendor,
+                isWindows: isWindowsCheck,
+                hasTouchSupport: hasTouchSupportCheck,
+                screenSize: `${window.innerWidth}x${window.innerHeight}`
+              });
+            }
           } else {
             activeAccelerator = 'dGPU';
             acceleratorType = gpuInfo.model !== 'Unknown' ? `${gpuInfo.vendor} ${gpuInfo.model}` : 'Discrete GPU';
             // Log detection
             if (import.meta.env.DEV) {
-              console.log('⚠️ Detected as discrete GPU:', acceleratorType);
+              console.log('⚠️ Detected as discrete GPU:', acceleratorType, {
+                gpuModel: gpuInfo.model,
+                vendor: gpuInfo.vendor,
+                isWindows: isWindowsCheck,
+                hasTouchSupport: hasTouchSupportCheck,
+                isLikelyHandheld
+              });
             }
           }
         }
