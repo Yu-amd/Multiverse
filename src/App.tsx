@@ -282,10 +282,15 @@ function App() {
     let igpuMemoryTotal = 0;
 
     try {
-      // Only log once in development
-      if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-        console.debug('Detecting accelerators for:', gpuInfo);
-        acceleratorDetectionLoggedRef.current = true;
+      // Log detection details (always in dev, once in production)
+      if (import.meta.env.DEV) {
+        console.log('🔍 Detecting accelerators for:', gpuInfo);
+        console.log('  GPU Model:', gpuInfo.model);
+        console.log('  GPU Vendor:', gpuInfo.vendor);
+        console.log('  User Agent:', navigator.userAgent);
+        console.log('  Platform:', navigator.platform);
+        console.log('  Screen Size:', `${window.innerWidth}x${window.innerHeight}`);
+        console.log('  Touch Support:', 'ontouchstart' in window || navigator.maxTouchPoints > 0);
       }
       
       // Check if it's an integrated GPU (like Strix Halo or ROG Ally X)
@@ -357,9 +362,16 @@ function App() {
                           // Intel integrated graphics
                           (vendorLower === 'intel' && (gpuModelLower.includes('uhd') || gpuModelLower.includes('iris') || (gpuModelLower.includes('arc') && !gpuModelLower.includes('a770'))));
 
-      // Only log once in development
-      if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-        console.debug('Is integrated GPU?', isIntegrated, 'Model:', gpuModelLower, 'Vendor:', vendorLower, 'IsKnownDiscrete:', isKnownDiscreteGPU, 'IsUnknownOnLinux:', isUnknownOnLinux);
+      // Log detection details
+      if (import.meta.env.DEV) {
+        console.log('🔍 GPU Detection Details:');
+        console.log('  Is Integrated?', isIntegrated);
+        console.log('  GPU Model (lower):', gpuModelLower);
+        console.log('  Vendor (lower):', vendorLower);
+        console.log('  Is Known Discrete GPU?', isKnownDiscreteGPU);
+        console.log('  Is Unknown on Linux?', isUnknownOnLinux);
+        console.log('  Has ROG Ally Indicators?', hasROGAllyIndicators);
+        console.log('  Is Handheld Gaming Device?', isHandheldGamingDevice);
       }
 
       if (isIntegrated) {
@@ -372,9 +384,9 @@ function App() {
           igpuModel = 'AMD Strix Halo (RDNA 3.5)';
           acceleratorType = 'AMD Strix Halo (RDNA 3.5) - 40 RDNA 3.5 CUs';
           igpuMemoryTotal = 16 * 1024; // Shared system memory
-          // Only log once in development
-          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-            console.debug('Detected Strix Halo as iGPU');
+          // Log detection
+          if (import.meta.env.DEV) {
+            console.log('✅ Detected Strix Halo as iGPU');
           }
         }
         // ROG Ally X (Z2E processor) specific - check after Strix Halo
@@ -384,9 +396,18 @@ function App() {
           igpuModel = 'ROG Ally X (RDNA 3)';
           acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
           igpuMemoryTotal = 16 * 1024; // Shared system memory
-          // Only log once in development
-          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-            console.debug('Detected ROG Ally X as iGPU');
+          // Log detection
+          if (import.meta.env.DEV) {
+            console.log('✅ Detected ROG Ally X as iGPU', {
+              gpuModel: gpuInfo.model,
+              vendor: gpuInfo.vendor,
+              hasROGAllyIndicators,
+              isHandheldGamingDevice,
+              userAgent: navigator.userAgent,
+              platform: navigator.platform,
+              screenSize: `${window.innerWidth}x${window.innerHeight}`,
+              touchSupport: 'ontouchstart' in window || navigator.maxTouchPoints > 0
+            });
           }
         } else if (gpuModelLower.includes('rdna') || (vendorLower === 'amd' && !isKnownDiscreteGPU)) {
           // Other AMD RDNA iGPUs or any AMD GPU that's not a known discrete model
@@ -444,8 +465,8 @@ function App() {
           igpuModel = 'ROG Ally X (RDNA 3)';
           acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
           igpuMemoryTotal = 16 * 1024;
-          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-            console.debug('Detected handheld gaming device (ROG Ally X) - setting iGPU', { 
+          if (import.meta.env.DEV) {
+            console.log('✅ Detected handheld gaming device (ROG Ally X) - setting iGPU', { 
               isHandheldDeviceCheck, 
               hasROGAllyIndicatorsCheck,
               vendor: vendorLower,
@@ -494,9 +515,9 @@ function App() {
             acceleratorType = igpuModel;
             igpuMemoryTotal = 8 * 1024;
           }
-          // Only log once in development
-          if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-            console.debug('Defaulting to iGPU (AMD or Linux unknown):', igpuModel, {
+          // Log detection
+          if (import.meta.env.DEV) {
+            console.log('✅ Defaulting to iGPU (AMD or Linux unknown):', igpuModel, {
               gpuModel: gpuInfo.model,
               vendor: gpuInfo.vendor,
               hasROGAllyInUA,
@@ -533,8 +554,8 @@ function App() {
               igpuMemoryTotal = 8 * 1024;
             }
             
-            if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-              console.debug('AMD system - defaulting to iGPU (not clearly discrete):', igpuModel, {
+            if (import.meta.env.DEV) {
+              console.log('✅ AMD system - defaulting to iGPU (not clearly discrete):', igpuModel, {
                 gpuModel: gpuInfo.model,
                 vendor: gpuInfo.vendor,
                 hasROGAllyInUA,
@@ -544,9 +565,9 @@ function App() {
           } else {
             activeAccelerator = 'dGPU';
             acceleratorType = gpuInfo.model !== 'Unknown' ? `${gpuInfo.vendor} ${gpuInfo.model}` : 'Discrete GPU';
-            // Only log once in development
-            if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-              console.debug('Detected as discrete GPU:', acceleratorType);
+            // Log detection
+            if (import.meta.env.DEV) {
+              console.log('⚠️ Detected as discrete GPU:', acceleratorType);
             }
           }
         }
@@ -571,8 +592,7 @@ function App() {
       console.warn('Accelerator detection error:', error);
     }
 
-
-    return {
+    const result = {
       active: activeAccelerator,
       type: acceleratorType,
       npuAvailable,
@@ -583,6 +603,13 @@ function App() {
       igpuModel,
       igpuMemoryTotal
     };
+    
+    // Log final result
+    if (import.meta.env.DEV) {
+      console.log('🎯 Final Accelerator Detection Result:', result);
+    }
+    
+    return result;
   };
 
   // Real GPU detection using browser APIs
