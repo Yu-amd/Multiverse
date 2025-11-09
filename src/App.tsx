@@ -284,11 +284,14 @@ function App() {
     try {
       // Log detection details (always in dev, once in production)
       if (import.meta.env.DEV) {
+        const processorInfo = (navigator as any).cpuClass || (navigator as any).oscpu || 'Not available';
         console.log('🔍 Detecting accelerators for:', gpuInfo);
         console.log('  GPU Model:', gpuInfo.model);
         console.log('  GPU Vendor:', gpuInfo.vendor);
         console.log('  User Agent:', navigator.userAgent);
         console.log('  Platform:', navigator.platform);
+        console.log('  Processor:', processorInfo);
+        console.log('  Hardware Concurrency:', navigator.hardwareConcurrency);
         console.log('  Screen Size:', `${window.innerWidth}x${window.innerHeight}`);
         console.log('  Touch Support:', 'ontouchstart' in window || navigator.maxTouchPoints > 0);
       }
@@ -324,8 +327,23 @@ function App() {
                                 window.innerHeight >= 400 && window.innerHeight <= 2000 &&
                                 hasTouchSupport);
       
-      // Check for ROG Ally X indicators in user agent, platform, or GPU model
+      // Check for ROG Ally X indicators in user agent, platform, GPU model, or processor name
       // This is important for WSL 2 where the browser runs on Windows
+      // Check processor name from navigator (if available)
+      // Processor names might be uppercase (Z1E, Z2E) or lowercase (z1e, z2e)
+      const processorInfo = (navigator as any).cpuClass || (navigator as any).oscpu || '';
+      const processorLower = processorInfo.toLowerCase();
+      const processorUpper = processorInfo.toUpperCase();
+      
+      // Check for Z1E/Z2E processor names (most reliable indicator)
+      // These might appear as Z1E, Z2E, z1e, z2e, Z1 Extreme, etc.
+      const hasZ1EProcessor = processorLower.includes('z1e') || 
+                              processorLower.includes('z1 extreme') ||
+                              processorUpper.includes('Z1E') ||
+                              processorUpper.includes('Z1 EXTREME');
+      const hasZ2EProcessor = processorLower.includes('z2e') || 
+                              processorUpper.includes('Z2E');
+      
       const hasROGAllyIndicators = gpuModelLower.includes('rog') || 
                                    gpuModelLower.includes('ally') ||
                                    gpuModelLower.includes('z2e') ||
@@ -335,10 +353,17 @@ function App() {
                                    ua.includes('ally') ||
                                    ua.includes('z2e') ||
                                    ua.includes('z1e') ||
+                                   ua.includes('z1 extreme') ||
                                    plat.includes('rog') ||
                                    plat.includes('ally') ||
                                    plat.includes('z2e') ||
-                                   plat.includes('z1e');
+                                   plat.includes('z1e') ||
+                                   plat.includes('z1 extreme') ||
+                                   // Processor name checks (case-insensitive)
+                                   hasZ1EProcessor ||
+                                   hasZ2EProcessor ||
+                                   processorLower.includes('rog') ||
+                                   processorLower.includes('ally');
       
       // Check for handheld gaming devices (ROG Ally X) - these are always iGPU
       // Also check if we have ROG Ally indicators (for WSL 2 / Windows detection)
@@ -395,9 +420,12 @@ function App() {
           }
         }
         // ROG Ally X (Z2E processor) specific - check after Strix Halo
+        // Check for Z1E/Z2E processor names (most reliable indicator)
         else if (gpuModelLower.includes('rog') || gpuModelLower.includes('ally') || 
             gpuModelLower.includes('z2e') || gpuModelLower.includes('z1e') ||
-            gpuModelLower.includes('z1 extreme') || isHandheldGamingDevice) {
+            gpuModelLower.includes('z1 extreme') || 
+            hasZ1EProcessor || hasZ2EProcessor ||
+            isHandheldGamingDevice) {
           igpuModel = 'ROG Ally X (RDNA 3)';
           acceleratorType = 'ROG Ally X (RDNA 3) - 12 CUs';
           igpuMemoryTotal = 16 * 1024; // Shared system memory
@@ -407,6 +435,9 @@ function App() {
               gpuModel: gpuInfo.model,
               vendor: gpuInfo.vendor,
               hasROGAllyIndicators,
+              hasZ1EProcessor,
+              hasZ2EProcessor,
+              processorInfo: processorInfo,
               isHandheldGamingDevice,
               userAgent: navigator.userAgent,
               platform: navigator.platform,
