@@ -1,8 +1,8 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import type { Message } from '../types';
 import { useChat } from '../hooks/useChat';
 import { renderMarkdown } from '../utils/markdown';
-import { VirtualizedMessages } from './VirtualizedMessages';
+import { VirtualizedMessages, type VirtualizedMessagesRef } from './VirtualizedMessages';
 
 interface ChatContainerProps {
   messages: Message[];
@@ -48,6 +48,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
   handleDeleteMessage
 }) => {
   const chatMessagesRef = useRef<HTMLDivElement>(null);
+  const virtualizedMessagesRef = useRef<VirtualizedMessagesRef>(null);
 
   const {
     inputMessage,
@@ -83,20 +84,90 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
   });
 
   // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
+  const scrollToBottom = useCallback(() => {
+    // Use the ref from VirtualizedMessages for reliable scrolling
+    if (virtualizedMessagesRef.current) {
+      virtualizedMessagesRef.current.scrollToBottom();
+    }
+    // Also try scrolling the parent container in case streaming content is outside virtualized area
     if (chatMessagesRef.current) {
-      // Find the scrollable container (VirtualizedMessages internal container)
-      const scrollContainer = chatMessagesRef.current.querySelector('[style*="overflow"]') as HTMLElement;
-      const targetElement = scrollContainer || chatMessagesRef.current;
-      
-      // Use requestAnimationFrame to ensure DOM is updated
       requestAnimationFrame(() => {
-        if (targetElement) {
-          targetElement.scrollTop = targetElement.scrollHeight;
+        if (chatMessagesRef.current) {
+          chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
         }
       });
     }
-  }, [messages, thinkingContent, responseContent]);
+  }, []);
+
+  // Throttled scroll for streaming content using requestAnimationFrame
+  const scrollAnimationFrameRef = useRef<number | null>(null);
+  const lastScrollTimeRef = useRef<number>(0);
+  const SCROLL_THROTTLE_MS = 16; // ~60fps (16ms per frame)
+
+  const throttledScrollToBottom = useCallback(() => {
+    const now = Date.now();
+    if (now - lastScrollTimeRef.current < SCROLL_THROTTLE_MS) {
+      // Schedule scroll for next frame if we're throttling
+      if (scrollAnimationFrameRef.current === null) {
+        scrollAnimationFrameRef.current = requestAnimationFrame(() => {
+          scrollAnimationFrameRef.current = null;
+          lastScrollTimeRef.current = Date.now();
+          scrollToBottom();
+        });
+      }
+    } else {
+      // Scroll immediately if enough time has passed
+      lastScrollTimeRef.current = now;
+      scrollToBottom();
+    }
+  }, [scrollToBottom]);
+
+  // Auto-scroll when messages change
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  // Continuous auto-scroll during streaming (throttled to ~60fps)
+  useEffect(() => {
+    if (isThinking || isLoading) {
+      // Scroll immediately on every content update for smooth, continuous rendering
+      if (thinkingContent || responseContent) {
+        // Use requestAnimationFrame for immediate smooth scrolling
+        requestAnimationFrame(() => {
+          scrollToBottom();
+        });
+      }
+    }
+  }, [thinkingContent, responseContent, isThinking, isLoading, scrollToBottom]);
+
+  // Observe streaming content sections for size changes and auto-scroll
+  const thinkingSectionRef = useRef<HTMLDivElement>(null);
+  const responseSectionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isThinking && !isLoading) return;
+
+    const observer = new ResizeObserver(() => {
+      // When streaming content grows, scroll to bottom (throttled)
+      throttledScrollToBottom();
+    });
+
+    if (thinkingSectionRef.current) {
+      observer.observe(thinkingSectionRef.current);
+    }
+    if (responseSectionRef.current) {
+      observer.observe(responseSectionRef.current);
+    }
+
+    return () => {
+      observer.disconnect();
+      // Clean up any pending animation frame
+      if (scrollAnimationFrameRef.current !== null) {
+        cancelAnimationFrame(scrollAnimationFrameRef.current);
+        scrollAnimationFrameRef.current = null;
+      }
+    };
+  }, [isThinking, isLoading, throttledScrollToBottom]);
 
   return (
     <div className="chat-container">
@@ -136,6 +207,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
       <div className="chat-messages" ref={chatMessagesRef} style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <VirtualizedMessages
+          ref={virtualizedMessagesRef}
           messages={messages}
           renderMessage={(message, index) => {
             const isEditing = editingMessageId === message.id;
@@ -369,7 +441,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         
         {/* Thinking Section */}
         {isThinking && thinkingContent && (
-          <div className="thinking-section">
+          <div ref={thinkingSectionRef} className="thinking-section">
             <div className="thinking-header">
               🤔 Thinking...
             </div>
@@ -386,7 +458,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         
         {/* Response Section */}
         {responseContent && (
-          <div className="response-section">
+          <div ref={responseSectionRef} className="response-section">
             <div className="response-header">
               💬 Response
             </div>
