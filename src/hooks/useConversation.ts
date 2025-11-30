@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Message, SavedConversation } from '../types';
+import { logger } from '../utils/logger';
 
 export const useConversation = () => {
   const loadConversation = (): Message[] => {
@@ -25,7 +26,7 @@ export const useConversation = () => {
         }));
       }
     } catch (e) {
-      console.warn('Failed to load conversation:', e);
+      logger.warn('Failed to load conversation:', e);
     }
     return [];
   };
@@ -41,7 +42,7 @@ export const useConversation = () => {
       };
       localStorage.setItem('multiverse-current-conversation', JSON.stringify(conversation));
     } catch (e) {
-      console.warn('Failed to save conversation:', e);
+      logger.warn('Failed to save conversation:', e);
     }
   }, [messages]);
 
@@ -52,7 +53,7 @@ export const useConversation = () => {
     try {
       localStorage.removeItem('multiverse-current-conversation');
     } catch (e) {
-      console.warn('Failed to clear conversation from localStorage:', e);
+      logger.warn('Failed to clear conversation from localStorage:', e);
     }
   };
 
@@ -63,7 +64,7 @@ export const useConversation = () => {
         return JSON.parse(saved);
       }
     } catch (e) {
-      console.warn('Failed to load conversations:', e);
+      logger.warn('Failed to load conversations:', e);
     }
     return [];
   };
@@ -88,7 +89,7 @@ export const useConversation = () => {
       localStorage.setItem('multiverse-conversations', JSON.stringify(limited));
       return true;
     } catch (e) {
-      console.warn('Failed to save conversation:', e);
+      logger.warn('Failed to save conversation:', e);
       return false;
     }
   };
@@ -105,7 +106,7 @@ export const useConversation = () => {
         };
       }
     } catch (e) {
-      console.warn('Failed to load conversation:', e);
+      logger.warn('Failed to load conversation:', e);
     }
     return null;
   };
@@ -116,7 +117,7 @@ export const useConversation = () => {
       const filtered = conversations.filter(c => c.id !== conversationId);
       localStorage.setItem('multiverse-conversations', JSON.stringify(filtered));
     } catch (e) {
-      console.warn('Failed to delete conversation:', e);
+      logger.warn('Failed to delete conversation:', e);
     }
   };
 
@@ -131,7 +132,7 @@ export const useConversation = () => {
       localStorage.setItem('multiverse-conversations', JSON.stringify(updated));
       return true;
     } catch (e) {
-      console.warn('Failed to rename conversation:', e);
+      logger.warn('Failed to rename conversation:', e);
       return false;
     }
   };

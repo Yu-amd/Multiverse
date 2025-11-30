@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { logger } from '../utils/logger';
 
 export interface Settings {
   selectedModel: string;
@@ -34,7 +35,7 @@ export const useSettings = () => {
         };
       }
     } catch (e) {
-      console.warn('Failed to load settings:', e);
+      logger.warn('Failed to load settings:', e);
     }
     return defaultSettings;
   };
@@ -46,7 +47,7 @@ export const useSettings = () => {
     try {
       localStorage.setItem('multiverse-settings', JSON.stringify(settings));
     } catch (e) {
-      console.warn('Failed to save settings:', e);
+      logger.warn('Failed to save settings:', e);
     }
   }, [settings]);
 

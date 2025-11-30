@@ -1,6 +1,7 @@
 // Analytics utilities for conversation statistics
 
 import type { Message, SavedConversation } from '../types';
+import { logger } from './logger';
 
 /**
  * Estimate token count from text
@@ -82,7 +83,7 @@ export const calculateAverageResponseTime = (messages: Message[]): number => {
         }
       } catch (e) {
         // Skip invalid timestamps
-        console.warn('Invalid timestamp in message:', e);
+        logger.warn('Invalid timestamp in message:', e);
       }
     }
   }
@@ -172,7 +173,7 @@ export const calculateOverallAnalytics = (conversations: SavedConversation[]): C
       if (createdAt < earliestDate) earliestDate = createdAt;
       if (createdAt > latestDate) latestDate = createdAt;
     } catch (e) {
-      console.warn('Error processing conversation:', e);
+      logger.warn('Error processing conversation:', e);
       // Continue with other conversations
     }
   });
@@ -232,7 +233,7 @@ export const calculateConversationAnalytics = (conversation: SavedConversation):
       const lastTime = toDate(lastMsg.timestamp);
       duration = lastTime.getTime() - firstTime.getTime();
     } catch (e) {
-      console.warn('Error calculating conversation duration:', e);
+      logger.warn('Error calculating conversation duration:', e);
       duration = 0;
     }
   }

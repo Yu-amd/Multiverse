@@ -35,6 +35,8 @@ import { CodePanel } from './components/CodePanel';
 import { Dashboard } from './components/Dashboard';
 import { SettingsModal } from './components/SettingsModal';
 import { ConversationHistoryModal } from './components/ConversationHistoryModal';
+import { SessionRecovery } from './components/SessionRecovery';
+import { saveCurrentSession, saveToHistory, hasRecoverableSession } from './utils/sessionPersistence';
 import { ApiInfoModal } from './components/ApiInfoModal';
 import { ToastContainer } from './components/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -42,12 +44,15 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 // Import hooks
 import { useSettings } from './hooks/useSettings';
 import { useConversation } from './hooks/useConversation';
+import type { Message } from './types';
 import { useTheme } from './hooks/useTheme';
 import { useToast } from './hooks/useToast';
 import { useConnection } from './hooks/useConnection';
 import { useBackendMetrics } from './hooks/useBackendMetrics';
 import { debounce } from './utils/debounce';
 import { useChat } from './hooks/useChat';
+import { logger } from './utils/logger';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 
 // Import utilities - not needed directly in App.tsx anymore
 
@@ -83,7 +88,7 @@ function App() {
       // Only log if we've exhausted all reconnection attempts
       // The hook itself will log connection status
       if (import.meta.env.DEV) {
-        console.debug('[Backend Metrics] Using browser metrics as fallback');
+        logger.debug('[Backend Metrics] Using browser metrics as fallback');
       }
     }
   });
@@ -127,6 +132,7 @@ function App() {
   const [showDashboard, setShowDashboard] = useState(false);
   const [showConversationHistory, setShowConversationHistory] = useState(false);
   const [showTimestamps, setShowTimestamps] = useState(false);
+  const [showSessionRecovery, setShowSessionRecovery] = useState(false);
   // Metrics data - will be updated with real values
   const [modelMetrics, setModelMetrics] = useState({
     promptToFirstToken: 0,
@@ -223,7 +229,7 @@ function App() {
           metrics.batteryDischargingTime = battery.dischargingTime;
         } catch {
           // Battery API not available or denied
-          console.log('Battery API not available');
+          logger.log('Battery API not available');
         }
       }
 
@@ -251,11 +257,11 @@ function App() {
           });
           observer.observe({ entryTypes: ['longtask', 'measure'] });
         } catch {
-          console.log('Performance Observer not fully supported');
+          logger.log('Performance Observer not fully supported');
         }
       }
     } catch (error) {
-      console.warn('Error collecting real-time metrics:', error);
+      logger.warn('Error collecting real-time metrics:', error);
     }
 
     return metrics;
@@ -461,7 +467,7 @@ function App() {
           igpuMemoryTotal = 8 * 1024; // Typical for modern AMD APUs
           // Only log once in development
           if (import.meta.env.DEV && !acceleratorDetectionLoggedRef.current) {
-            console.debug('Detected AMD iGPU:', igpuModel);
+            logger.debug('Detected AMD iGPU:', igpuModel);
           }
         } else {
           igpuModel = gpuInfo.model;
@@ -615,7 +621,7 @@ function App() {
         acceleratorType = npuModel;
       }
     } catch (error) {
-      console.warn('Accelerator detection error:', error);
+      logger.warn('Accelerator detection error:', error);
     }
 
     return {
@@ -678,7 +684,7 @@ function App() {
                 // Log for debugging
                 // Log for debugging (only once)
                 if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
-                  console.debug('WebGPU Detection:', { vendorString, deviceString, description, fullInfo: info });
+                  logger.debug('WebGPU Detection:', { vendorString, deviceString, description, fullInfo: info });
                 }
 
                 // Detect AMD Strix Halo - check multiple fields
@@ -695,7 +701,7 @@ function App() {
                   clockSpeed = 2900; // Up to 2900 MHz boost frequency
                   // Only log once in development
                   if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
-                    console.debug('Detected ROG Ally X!', { gpuModel, gpuVendor, memoryTotal, computeUnits });
+                    logger.debug('Detected ROG Ally X!', { gpuModel, gpuVendor, memoryTotal, computeUnits });
                   }
                   return { model: gpuModel, vendor: gpuVendor, memoryTotal, memoryBandwidth, computeUnits, clockSpeed };
                 }
@@ -711,7 +717,7 @@ function App() {
                   clockSpeed = 2500; // Typical clock speed
                   // Only log once in development
                   if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
-                    console.debug('Detected AMD Strix Halo!', { gpuModel, gpuVendor, memoryTotal, computeUnits });
+                    logger.debug('Detected AMD Strix Halo!', { gpuModel, gpuVendor, memoryTotal, computeUnits });
                   }
                   return { model: gpuModel, vendor: gpuVendor, memoryTotal, memoryBandwidth, computeUnits, clockSpeed };
                 }
@@ -786,7 +792,7 @@ function App() {
                   
                   // Only log once in development
                   if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
-                    console.debug('Detected AMD GPU:', { gpuModel, gpuVendor, deviceString, description });
+                    logger.debug('Detected AMD GPU:', { gpuModel, gpuVendor, deviceString, description });
                   }
                 }
                 // Detect NVIDIA GPUs
@@ -847,7 +853,7 @@ function App() {
         
         // Only log fallback detection once (in development)
         if (import.meta.env.DEV && !webGpuAvailableRef.current) {
-          console.debug('Fallback detection:', { userAgent, platform, hardwareConcurrency });
+          logger.debug('Fallback detection:', { userAgent, platform, hardwareConcurrency });
         }
         
         // Check for ROG Ally X (Z2E processor) in user agent or platform
@@ -863,7 +869,7 @@ function App() {
           clockSpeed = 2900; // Up to 2900 MHz boost frequency
           // Only log once in development
           if (import.meta.env.DEV) {
-            console.debug('Detected ROG Ally X via fallback');
+            logger.debug('Detected ROG Ally X via fallback');
           }
         }
         // Check for AMD Strix Halo in user agent or platform
@@ -877,7 +883,7 @@ function App() {
           clockSpeed = 2500;
           // Only log once in development
           if (import.meta.env.DEV) {
-            console.debug('Detected Strix Halo via fallback');
+            logger.debug('Detected Strix Halo via fallback');
           }
         }
         // Check for AMD in general
@@ -904,7 +910,7 @@ function App() {
           clockSpeed = 2500;
           // Only log once in development
           if (import.meta.env.DEV) {
-            console.debug('Detected likely AMD Strix Halo (Linux + high core count)');
+            logger.debug('Detected likely AMD Strix Halo (Linux + high core count)');
           }
         }
         // Linux system - likely AMD iGPU (most Linux laptops with AMD)
@@ -923,7 +929,7 @@ function App() {
       } catch (error) {
         // Only log GPU detection errors in development, and only once
         if (import.meta.env.DEV && webGpuAvailableRef.current === null) {
-          console.debug('GPU detection error (expected on some platforms):', error);
+          logger.debug('GPU detection error (expected on some platforms):', error);
           webGpuAvailableRef.current = false;
         }
       }
@@ -944,13 +950,13 @@ function App() {
       }
       // Only log once in development
       if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
-        console.debug('Marked AMD GPU as iGPU (final check):', gpuModel);
+        logger.debug('Marked AMD GPU as iGPU (final check):', gpuModel);
       }
     }
     
     // Only log final result once in development
     if (import.meta.env.DEV && !gpuDetectionLoggedRef.current) {
-      console.debug('Final GPU detection result:', { model: gpuModel, vendor: gpuVendor, memoryTotal, computeUnits });
+      logger.debug('Final GPU detection result:', { model: gpuModel, vendor: gpuVendor, memoryTotal, computeUnits });
       gpuDetectionLoggedRef.current = true;
     }
     return { model: gpuModel, vendor: gpuVendor, memoryTotal, memoryBandwidth, computeUnits, clockSpeed };
@@ -1005,11 +1011,11 @@ function App() {
       
       // Debug logging (only once in development)
       if (import.meta.env.DEV && !screenSizeLoggedRef.current) {
-        console.debug('Screen size:', width, 'x', height);
-        console.debug('Aspect ratio:', aspectRatio.toFixed(2));
-        console.debug('Touch support:', 'ontouchstart' in window || navigator.maxTouchPoints > 0);
-        console.debug('ROG Ally X detected:', isROGAllyX, '(forced:', forceROGAllyX, ', handheld:', isHandheldGamingDevice, ')');
-        console.debug('Layout:', isROGAllyX ? 'ROG Ally X' : 
+        logger.debug('Screen size:', width, 'x', height);
+        logger.debug('Aspect ratio:', aspectRatio.toFixed(2));
+        logger.debug('Touch support:', 'ontouchstart' in window || navigator.maxTouchPoints > 0);
+        logger.debug('ROG Ally X detected:', isROGAllyX, '(forced:', forceROGAllyX, ', handheld:', isHandheldGamingDevice, ')');
+        logger.debug('Layout:', isROGAllyX ? 'ROG Ally X' : 
                     (width < 768 || height < 600) ? 'Mobile' : 
                     (width >= 768 && width < 1024) ? 'Tablet' : 'Desktop');
         screenSizeLoggedRef.current = true;
@@ -1029,25 +1035,36 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
-  // Save conversation to localStorage whenever messages change
+  // Save current session to localStorage whenever messages or settings change
   useEffect(() => {
     if (messages.length > 0) {
-      const conversation = {
-        id: 'current',
-        title: messages.length > 0 ? messages[0].content.substring(0, 50) : 'New Conversation',
-        messages: messages,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        model: selectedModel,
-        endpoint: customEndpoint
-      };
-      try {
-        localStorage.setItem('multiverse-current-conversation', JSON.stringify(conversation));
-      } catch (e) {
-        console.warn('Failed to save conversation:', e);
-      }
+      saveCurrentSession(messages, {
+        selectedModel,
+        customEndpoint,
+        apiKey,
+        temperature,
+        maxTokens,
+        topP
+      });
+      
+      // Also save to history (last 3 sessions)
+      saveToHistory(messages, {
+        selectedModel,
+        customEndpoint,
+        apiKey,
+        temperature,
+        maxTokens,
+        topP
+      });
     }
-  }, [messages, selectedModel, customEndpoint]);
+  }, [messages, selectedModel, customEndpoint, apiKey, temperature, maxTokens, topP]);
+
+  // Check for recoverable session on mount
+  useEffect(() => {
+    if (hasRecoverableSession() && messages.length === 0) {
+      setShowSessionRecovery(true);
+    }
+  }, [messages.length]); // Only run on mount or when messages change
 
   // Save settings to localStorage whenever settings change
   useEffect(() => {
@@ -1062,7 +1079,7 @@ function App() {
       };
       localStorage.setItem('multiverse-settings', JSON.stringify(settings));
     } catch (e) {
-      console.warn('Failed to save settings:', e);
+      logger.warn('Failed to save settings:', e);
     }
   }, [selectedModel, customEndpoint, apiKey, temperature, maxTokens, topP]);
 
@@ -1162,7 +1179,7 @@ function App() {
           igpuMemoryTotal: detectedAccelerators.igpuMemoryTotal
         }));
       } catch (error) {
-        console.error('Hardware detection error:', error);
+        logger.error('Hardware detection error:', error);
       }
     };
 
@@ -1260,7 +1277,7 @@ function App() {
           igpuMemoryTotal: detectedAccelerators.igpuMemoryTotal
         }));
       } catch (error) {
-        console.error('Hardware detection error:', error);
+        logger.error('Hardware detection error:', error);
       }
     }, 500); // Debounce to 500ms
 
@@ -1328,6 +1345,28 @@ function App() {
     clearConversation();
     showToast('Chat cleared', 'info');
   };
+
+  // Keyboard shortcuts
+  const stopGenerationRef = useRef<(() => void) | null>(null);
+  
+  useKeyboardShortcuts({
+    onOpenSettings: () => setShowSettings(true),
+    onOpenDashboard: () => setShowDashboard(true),
+    onOpenHistory: () => setShowConversationHistory(true),
+    onClearChat: handleClearChat,
+    onFocusInput: () => {
+      // Find and focus the chat input
+      const input = document.querySelector('.chat-input') as HTMLTextAreaElement;
+      if (input) {
+        input.focus();
+      }
+    },
+    onStopGeneration: () => {
+      if (stopGenerationRef.current) {
+        stopGenerationRef.current();
+      }
+    }
+  });
 
   // Helper functions for conversation history - use from hook
   const handleExportConversation = (format: 'json' | 'markdown' | 'txt' = 'json') => {
@@ -1426,7 +1465,7 @@ function App() {
           showToast('Invalid conversation file format', 'error');
         }
       } catch (err) {
-        console.error('Import error:', err);
+        logger.error('Import error:', err);
         showToast('Failed to import conversation. Please check the file format.', 'error');
       }
     };
@@ -1442,9 +1481,32 @@ function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
+  const handleRestoreSession = (
+    restoredMessages: Message[],
+    restoredSettings: {
+      selectedModel: string;
+      customEndpoint: string;
+      apiKey: string;
+      temperature: number;
+      maxTokens: number;
+      topP: number;
+    }
+  ) => {
+    setMessages(restoredMessages);
+    updateSettings(restoredSettings);
+    setShowSessionRecovery(false);
+    showToast('Session restored successfully', 'success');
+  };
+
   return (
     <ErrorBoundary>
       <div className="app-container">
+        {showSessionRecovery && (
+          <SessionRecovery
+            onRestore={handleRestoreSession}
+            onDismiss={() => setShowSessionRecovery(false)}
+          />
+        )}
         <div className={`content-wrapper ${isROGAllyX ? 'rog-ally-layout' : isMobile ? 'mobile-layout' : isTablet ? 'tablet-layout' : 'desktop-layout'}`}>
           <ErrorBoundary>
             <ChatContainer
@@ -1485,6 +1547,7 @@ function App() {
               onOpenDashboard={() => setShowDashboard(true)}
               onOpenHistory={() => setShowConversationHistory(true)}
               handleDeleteMessage={handleDeleteMessage}
+              onStopGenerationRef={stopGenerationRef}
             />
           </ErrorBoundary>
           
@@ -1532,9 +1595,72 @@ function App() {
             <Dashboard
               showDashboard={showDashboard}
               onClose={() => setShowDashboard(false)}
+              messages={messages}
               modelMetrics={modelMetrics}
               systemMetrics={systemMetrics}
               compositeMetrics={compositeMetrics}
+              sessionMetrics={(() => {
+                // Calculate session metrics from messages
+                const messagesWithMetrics = messages.filter(m => m.role === 'assistant' && m.metrics);
+                
+                if (messagesWithMetrics.length === 0) {
+                  return {
+                    totalMessages: 0,
+                    averageTimeToFirstToken: 0,
+                    averageTokensPerSecond: 0,
+                    totalTokensIn: 0,
+                    totalTokensOut: 0,
+                    totalTime: 0,
+                    messages: []
+                  };
+                }
+
+                const totalMessages = messagesWithMetrics.length;
+                let totalTimeToFirstToken = 0;
+                let totalTokensPerSecond = 0;
+                let totalTokensIn = 0;
+                let totalTokensOut = 0;
+                let totalTime = 0;
+
+                messagesWithMetrics.forEach(msg => {
+                  if (msg.metrics) {
+                    if (msg.metrics.timeToFirstToken !== undefined) {
+                      totalTimeToFirstToken += msg.metrics.timeToFirstToken;
+                    }
+                    if (msg.metrics.tokensPerSecond !== undefined) {
+                      totalTokensPerSecond += msg.metrics.tokensPerSecond;
+                    }
+                    if (msg.metrics.tokensIn !== undefined) {
+                      totalTokensIn += msg.metrics.tokensIn;
+                    }
+                    if (msg.metrics.tokensOut !== undefined) {
+                      totalTokensOut += msg.metrics.tokensOut;
+                    }
+                    if (msg.metrics.totalTime !== undefined) {
+                      totalTime += msg.metrics.totalTime;
+                    }
+                  }
+                });
+
+                return {
+                  totalMessages,
+                  averageTimeToFirstToken: totalMessages > 0 ? totalTimeToFirstToken / totalMessages : 0,
+                  averageTokensPerSecond: totalMessages > 0 ? totalTokensPerSecond / totalMessages : 0,
+                  totalTokensIn,
+                  totalTokensOut,
+                  totalTime,
+                  messages: messagesWithMetrics.map(msg => ({
+                    messageId: msg.id,
+                    timeToFirstToken: msg.metrics?.timeToFirstToken ?? 0,
+                    totalTime: msg.metrics?.totalTime ?? 0,
+                    tokensPerSecond: msg.metrics?.tokensPerSecond ?? 0,
+                    tokensIn: msg.metrics?.tokensIn ?? 0,
+                    tokensOut: msg.metrics?.tokensOut ?? 0,
+                    promptLength: msg.metrics?.tokensIn ?? 0,
+                    responseLength: msg.metrics?.tokensOut ?? 0
+                  }))
+                };
+              })()}
               selectedModel={selectedModel}
               customEndpoint={customEndpoint}
               temperature={temperature}

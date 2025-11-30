@@ -37,7 +37,8 @@ describe('getFriendlyErrorMessage', () => {
   it('should handle generic errors', () => {
     const error = new Error('Something went wrong');
     const result = getFriendlyErrorMessage(error);
-    expect(result).toBe('Error: Something went wrong');
+    // createAppError returns just the message for unknown errors, not "Error: " prefix
+    expect(result).toBe('Something went wrong');
   });
 
   it('should handle non-Error objects', () => {

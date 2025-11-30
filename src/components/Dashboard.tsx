@@ -1,10 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { HintIcon } from './HintIcon';
 import { responseCache } from '../utils/cache';
+import { logger } from '../utils/logger';
+import type { SessionMetrics } from '../types/messageMetrics';
 
 interface DashboardProps {
   showDashboard: boolean;
   onClose: () => void;
+  messages?: Array<{
+    id: string;
+    role: 'user' | 'assistant';
+    metrics?: {
+      timeToFirstToken?: number;
+      totalTime?: number;
+      tokensPerSecond?: number;
+      tokensIn?: number;
+      tokensOut?: number;
+    };
+  }>;
+  sessionMetrics?: SessionMetrics;
   modelMetrics: {
     promptToFirstToken: number;
     totalResponseTime: number;
@@ -59,6 +73,8 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({
   showDashboard,
   onClose,
+  messages = [],
+  sessionMetrics,
   modelMetrics,
   systemMetrics,
   compositeMetrics,
@@ -69,7 +85,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   isMobile,
   isROGAllyX
 }) => {
-  const [activeDashboardTab, setActiveDashboardTab] = useState<'model' | 'system' | 'composite' | 'cache'>('model');
+  const [activeDashboardTab, setActiveDashboardTab] = useState<'model' | 'system' | 'composite' | 'analytics' | 'cache'>('model');
   const [cacheStats, setCacheStats] = useState(responseCache.getStats());
 
   // Update cache stats periodically
@@ -92,6 +108,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
     >
       <div 
         className="dashboard-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dashboard-title"
         style={{
           padding: isMobile ? '15px' : '20px',
           maxWidth: isMobile ? '95%' : '90%',
@@ -101,20 +120,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="dashboard-header">
-          <h2 className="dashboard-title" style={{ fontSize: isROGAllyX ? '1.8rem' : '1.5rem' }}>📊 Performance Dashboard</h2>
+          <h2 id="dashboard-title" className="dashboard-title" style={{ fontSize: isROGAllyX ? '1.8rem' : '1.5rem' }}>📊 Performance Dashboard</h2>
           <button 
             className="dashboard-close"
             onClick={onClose}
+            aria-label="Close dashboard"
           >
             ✕ Close
           </button>
         </div>
 
         {/* Dashboard Tabs */}
-        <div className="dashboard-tabs">
+        <div className="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
           <button 
             className={`dashboard-tab ${activeDashboardTab === 'model' ? 'active' : ''}`}
             onClick={() => setActiveDashboardTab('model')}
+            role="tab"
+            aria-selected={activeDashboardTab === 'model'}
+            aria-controls="dashboard-panel"
             style={{
               fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem'
             }}
@@ -124,6 +147,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <button 
             className={`dashboard-tab ${activeDashboardTab === 'system' ? 'active' : ''}`}
             onClick={() => setActiveDashboardTab('system')}
+            role="tab"
+            aria-selected={activeDashboardTab === 'system'}
+            aria-controls="dashboard-panel"
             style={{
               fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem'
             }}
@@ -133,6 +159,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <button 
             className={`dashboard-tab ${activeDashboardTab === 'composite' ? 'active' : ''}`}
             onClick={() => setActiveDashboardTab('composite')}
+            role="tab"
+            aria-selected={activeDashboardTab === 'composite'}
+            aria-controls="dashboard-panel"
             style={{
               fontSize: isMobile ? '0.8rem' : isROGAllyX ? '1.2rem' : '1rem'
             }}
@@ -216,6 +245,51 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
                 </div>
               </div>
+              
+              {sessionMetrics && sessionMetrics.totalMessages > 0 && (
+                <div className="metric-card" style={{ marginTop: '20px' }}>
+                  <HintIcon text="Session Metrics: Aggregated performance metrics across all messages in the current session. Average time to first token and tokens per second are calculated from all assistant messages with metrics." />
+                  <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>📈 Session Aggregates</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '15px', marginTop: '10px' }}>
+                    <div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Total Messages</div>
+                      <div className="value" style={{ fontSize: isROGAllyX ? '1.1rem' : '1rem', fontWeight: 600 }}>
+                        {sessionMetrics.totalMessages}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Avg Time to First Token</div>
+                      <div className="value" style={{ fontSize: isROGAllyX ? '1.1rem' : '1rem', fontWeight: 600 }}>
+                        {(sessionMetrics.averageTimeToFirstToken / 1000).toFixed(2)}s
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Avg Tokens/Second</div>
+                      <div className="value" style={{ fontSize: isROGAllyX ? '1.1rem' : '1rem', fontWeight: 600 }}>
+                        {sessionMetrics.averageTokensPerSecond.toFixed(1)} tok/s
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Total Tokens In</div>
+                      <div className="value" style={{ fontSize: isROGAllyX ? '1.1rem' : '1rem', fontWeight: 600 }}>
+                        {sessionMetrics.totalTokensIn}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Total Tokens Out</div>
+                      <div className="value" style={{ fontSize: isROGAllyX ? '1.1rem' : '1rem', fontWeight: 600 }}>
+                        {sessionMetrics.totalTokensOut}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Total Time</div>
+                      <div className="value" style={{ fontSize: isROGAllyX ? '1.1rem' : '1rem', fontWeight: 600 }}>
+                        {(sessionMetrics.totalTime / 1000).toFixed(2)}s
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
               
               <div className="metric-card">
                 <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>💡 Real-time Status</h4>
@@ -477,6 +551,117 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           )}
 
+          {activeDashboardTab === 'analytics' && (
+            <div>
+              {/* Session Metrics */}
+              <div style={{ marginBottom: '24px' }}>
+                <h3 style={{ marginBottom: '16px', fontSize: '18px', fontWeight: 600 }}>
+                  Session Performance
+                </h3>
+                {(() => {
+                  const assistantMessages = messages.filter(m => m.role === 'assistant' && m.metrics);
+                  if (assistantMessages.length === 0) {
+                    return (
+                      <div style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+                        No metrics available yet. Send a message to see performance data.
+                      </div>
+                    );
+                  }
+
+                  const totalMessages = assistantMessages.length;
+                  const avgTimeToFirstToken = assistantMessages.reduce((sum, m) => 
+                    sum + (m.metrics?.timeToFirstToken || 0), 0) / totalMessages;
+                  const avgTokensPerSecond = assistantMessages.reduce((sum, m) => 
+                    sum + (m.metrics?.tokensPerSecond || 0), 0) / totalMessages;
+                  const totalTokensIn = assistantMessages.reduce((sum, m) => 
+                    sum + (m.metrics?.tokensIn || 0), 0);
+                  const totalTokensOut = assistantMessages.reduce((sum, m) => 
+                    sum + (m.metrics?.tokensOut || 0), 0);
+                  const totalTime = assistantMessages.reduce((sum, m) => 
+                    sum + (m.metrics?.totalTime || 0), 0);
+
+                  return (
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                      gap: '16px',
+                      marginBottom: '24px'
+                    }}>
+                      <div style={{
+                        padding: '16px',
+                        background: 'var(--bg-secondary)',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color)'
+                      }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                          Total Messages
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: 600 }}>
+                          {totalMessages}
+                        </div>
+                      </div>
+                      <div style={{
+                        padding: '16px',
+                        background: 'var(--bg-secondary)',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color)'
+                      }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                          Avg Time to First Token
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: 600 }}>
+                          {(avgTimeToFirstToken / 1000).toFixed(2)}s
+                        </div>
+                      </div>
+                      <div style={{
+                        padding: '16px',
+                        background: 'var(--bg-secondary)',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color)'
+                      }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                          Avg Tokens/Second
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: 600 }}>
+                          {avgTokensPerSecond.toFixed(1)}
+                        </div>
+                      </div>
+                      <div style={{
+                        padding: '16px',
+                        background: 'var(--bg-secondary)',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color)'
+                      }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                          Total Tokens
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: 600 }}>
+                          {totalTokensIn + totalTokensOut}
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                          {totalTokensIn} in / {totalTokensOut} out
+                        </div>
+                      </div>
+                      <div style={{
+                        padding: '16px',
+                        background: 'var(--bg-secondary)',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color)'
+                      }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                          Total Response Time
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: 600 }}>
+                          {(totalTime / 1000).toFixed(1)}s
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
           {activeDashboardTab === 'cache' && (
             <div>
               {/* Cache Statistics Banner */}
@@ -638,7 +823,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <button
                       onClick={() => {
                         const debugInfo = responseCache.getDebugInfo();
-                        console.log('🔍 Cache Debug Info:', debugInfo);
+                        logger.log('🔍 Cache Debug Info:', debugInfo);
                         alert(`Cache Debug Info logged to console!\n\nFull-context entries: ${debugInfo.fullContextCache.size}\nSimple entries: ${debugInfo.simpleCache.size}\nTotal hits: ${debugInfo.statistics.hits + debugInfo.statistics.simpleHits}\nHit rate: ${(debugInfo.statistics.hitRate * 100).toFixed(1)}%\n\nCheck browser console for detailed information.`);
                       }}
                       style={{

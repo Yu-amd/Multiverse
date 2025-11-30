@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { Message } from '../types';
+import { logger } from '../utils/logger';
 
 interface CodePanelProps {
   messages: Message[];
@@ -883,7 +884,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       await navigator.clipboard.writeText(getCurrentCode());
       showToast('Code copied to clipboard!', 'success');
     } catch (err) {
-      console.error('Failed to copy code:', err);
+      logger.error('Failed to copy code:', err);
       showToast('Failed to copy code', 'error');
     }
   };
@@ -896,12 +897,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           <button 
             className="info-button"
             onClick={onOpenApiInfo}
+            aria-label="Open API information"
           >
             ℹ️ Info
           </button>
           <button 
             className="copy-button"
             onClick={handleCopyCode}
+            aria-label="Copy code to clipboard"
           >
             📋 Copy
           </button>
@@ -909,34 +912,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       </div>
 
       {/* Language Tabs */}
-      <div className="language-tabs">
+      <div className="language-tabs" role="tablist" aria-label="Code language selection">
         <button 
           className={`language-tab ${selectedLanguage === 'python' ? 'active' : ''}`}
           onClick={() => setSelectedLanguage('python')}
+          role="tab"
+          aria-selected={selectedLanguage === 'python'}
+          aria-controls="code-preview"
         >
           Python
         </button>
         <button 
           className={`language-tab ${selectedLanguage === 'javascript' ? 'active' : ''}`}
           onClick={() => setSelectedLanguage('javascript')}
+          role="tab"
+          aria-selected={selectedLanguage === 'javascript'}
+          aria-controls="code-preview"
         >
           JavaScript
         </button>
         <button 
           className={`language-tab ${selectedLanguage === 'curl' ? 'active' : ''}`}
           onClick={() => setSelectedLanguage('curl')}
+          role="tab"
+          aria-selected={selectedLanguage === 'curl'}
+          aria-controls="code-preview"
         >
           cURL
         </button>
         <button 
           className={`language-tab ${selectedLanguage === 'rust' ? 'active' : ''}`}
           onClick={() => setSelectedLanguage('rust')}
+          role="tab"
+          aria-selected={selectedLanguage === 'rust'}
+          aria-controls="code-preview"
         >
           Rust
         </button>
       </div>
 
-      <div className="code-preview">
+      <div id="code-preview" className="code-preview" role="tabpanel" aria-label={`${selectedLanguage} code preview`}>
         <div className="code-content-highlighted">
           {highlightCode(getCurrentCode(), getLanguageName())}
         </div>

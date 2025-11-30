@@ -5,6 +5,13 @@ export interface Message {
   timestamp: Date;
   edited?: boolean;
   originalContent?: string;
+  metrics?: {
+    timeToFirstToken?: number; // milliseconds
+    totalTime?: number; // milliseconds
+    tokensPerSecond?: number;
+    tokensIn?: number;
+    tokensOut?: number;
+  };
 }
 
 export interface SavedConversation {

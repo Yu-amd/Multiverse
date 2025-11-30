@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { logger } from '../utils/logger';
 
 export const useTheme = () => {
   const loadTheme = (): 'light' | 'dark' => {
@@ -12,7 +13,7 @@ export const useTheme = () => {
         return 'light';
       }
     } catch (e) {
-      console.warn('Failed to load theme:', e);
+      logger.warn('Failed to load theme:', e);
     }
     return 'dark';
   };
@@ -24,7 +25,7 @@ export const useTheme = () => {
     try {
       localStorage.setItem('multiverse-theme', theme);
     } catch (e) {
-      console.warn('Failed to save theme:', e);
+      logger.warn('Failed to save theme:', e);
     }
   }, [theme]);
 

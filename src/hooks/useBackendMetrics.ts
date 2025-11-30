@@ -1,4 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
+import { logger } from '../utils/logger';
+import { validateMetricsMessage } from '../schemas/metrics';
 
 interface BackendMetrics {
   timestamp: string;
@@ -66,9 +68,9 @@ export const useBackendMetrics = (options: UseBackendMetricsOptions = {}) => {
 
       ws.onopen = () => {
         if (reconnectAttempts.current > 0) {
-          console.log('[Backend Metrics] WebSocket reconnected successfully');
+          logger.log('[Backend Metrics] WebSocket reconnected successfully');
         } else {
-          console.log('[Backend Metrics] WebSocket connected');
+          logger.log('[Backend Metrics] WebSocket connected');
         }
         setConnected(true);
         setError(null);
@@ -83,10 +85,61 @@ export const useBackendMetrics = (options: UseBackendMetricsOptions = {}) => {
 
       ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data) as BackendMetrics;
-          setMetrics(data);
+          const rawData = JSON.parse(event.data);
+          // Validate with Zod schema
+          const validatedData = validateMetricsMessage(rawData);
+          if (validatedData.type === 'metrics' && validatedData.data) {
+            // Convert validated data to BackendMetrics format
+            const metricsData = validatedData.data;
+            setMetrics({
+              timestamp: new Date().toISOString(),
+              cpu: {
+                utilization: metricsData.cpu?.utilization ?? 0,
+                cores: metricsData.cpu?.cores ?? 0,
+                frequency: metricsData.cpu?.frequency ?? null,
+                maxFrequency: metricsData.cpu?.frequency ?? null
+              },
+              memory: {
+                total: metricsData.memory?.total ?? 0,
+                used: metricsData.memory?.used ?? 0,
+                available: metricsData.memory?.available ?? 0,
+                percent: metricsData.memory?.percentage ?? 0,
+                swapTotal: 0,
+                swapUsed: 0,
+                swapPercent: 0
+              },
+              gpu: metricsData.gpu ? {
+                model: metricsData.gpu.model ?? 'Unknown',
+                vendor: metricsData.gpu.vendor ?? 'Unknown',
+                memoryTotal: metricsData.gpu.memory_total ?? 0,
+                memoryUsed: metricsData.gpu.memory_used ?? 0,
+                memoryFree: (metricsData.gpu.memory_total ?? 0) - (metricsData.gpu.memory_used ?? 0),
+                memoryPercent: metricsData.gpu.memory_used && metricsData.gpu.memory_total 
+                  ? (metricsData.gpu.memory_used / metricsData.gpu.memory_total) * 100 
+                  : 0,
+                utilization: metricsData.gpu.utilization ?? 0,
+                memoryUtilization: metricsData.gpu.memory_used && metricsData.gpu.memory_total 
+                  ? (metricsData.gpu.memory_used / metricsData.gpu.memory_total) * 100 
+                  : 0,
+                temperature: metricsData.gpu.temperature ?? 0,
+                powerDraw: metricsData.gpu.power_draw ?? null,
+                graphicsClock: metricsData.gpu.clock_speed ?? null,
+                memoryClock: null
+              } : null,
+              battery: metricsData.battery ? {
+                level: metricsData.battery.level ?? 100,
+                charging: metricsData.battery.charging ?? false,
+                timeRemaining: metricsData.battery.discharging_time ?? null
+              } : null
+            });
+          } else if (validatedData.type === 'error') {
+            logger.error('[Backend Metrics] Error from backend:', validatedData.error);
+          }
         } catch (e) {
-          console.error('[Backend Metrics] Failed to parse metrics:', e);
+          logger.error('[Backend Metrics] Failed to parse or validate metrics:', e);
+          if (e instanceof Error && e.message.includes('Invalid metrics')) {
+            logger.error('[Backend Metrics] Backend returned invalid payload. Check backend implementation.');
+          }
         }
       };
 
@@ -101,7 +154,7 @@ export const useBackendMetrics = (options: UseBackendMetricsOptions = {}) => {
             2: 'CLOSING',
             3: 'CLOSED'
           };
-          console.warn(
+          logger.warn(
             `[Backend Metrics] WebSocket connection error (will retry):`,
             `State: ${stateNames[wsState] || wsState}`,
             `URL: ${wsUrl}`,
@@ -116,7 +169,7 @@ export const useBackendMetrics = (options: UseBackendMetricsOptions = {}) => {
       ws.onclose = (event) => {
         // Only log if it wasn't a clean close or if we're not in initial connection
         if (event.code !== 1000 || reconnectAttempts.current === 0) {
-          console.log('[Backend Metrics] WebSocket closed', event.code !== 1000 ? '(unexpected)' : '');
+          logger.log('[Backend Metrics] WebSocket closed', event.code !== 1000 ? '(unexpected)' : '');
         }
         setConnected(false);
         wsRef.current = null;
@@ -127,14 +180,14 @@ export const useBackendMetrics = (options: UseBackendMetricsOptions = {}) => {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
           // Only log reconnection attempts, not the initial connection failure
           if (reconnectAttempts.current > 1) {
-            console.log(`[Backend Metrics] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})`);
+            logger.log(`[Backend Metrics] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})`);
           }
           
           reconnectTimeoutRef.current = setTimeout(() => {
             connect();
           }, delay);
         } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          console.warn('[Backend Metrics] Max reconnection attempts reached. Backend metrics unavailable - using browser metrics.');
+          logger.warn('[Backend Metrics] Max reconnection attempts reached. Backend metrics unavailable - using browser metrics.');
           const err = new Error('Failed to connect to metrics service after multiple attempts');
           setError(err);
           if (onError) onError(err);
@@ -143,7 +196,7 @@ export const useBackendMetrics = (options: UseBackendMetricsOptions = {}) => {
 
       wsRef.current = ws;
     } catch (e) {
-      console.error('[Backend Metrics] Failed to create WebSocket:', e);
+      logger.error('[Backend Metrics] Failed to create WebSocket:', e);
       const err = e instanceof Error ? e : new Error('Failed to create WebSocket connection');
       setError(err);
       if (onError) onError(err);
@@ -193,7 +246,7 @@ export const useBackendMetrics = (options: UseBackendMetricsOptions = {}) => {
       const data = await response.json() as BackendMetrics;
       return data;
     } catch (e) {
-      console.error('[Backend Metrics] Failed to fetch metrics:', e);
+      logger.error('[Backend Metrics] Failed to fetch metrics:', e);
       return null;
     }
   };
@@ -207,4 +260,3 @@ export const useBackendMetrics = (options: UseBackendMetricsOptions = {}) => {
     fetchMetrics
   };
 };
-

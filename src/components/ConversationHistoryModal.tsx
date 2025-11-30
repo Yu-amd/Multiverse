@@ -121,6 +121,9 @@ export const ConversationHistoryModal: React.FC<ConversationHistoryModalProps> =
     >
       <div 
         className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-title"
         style={{
           padding: isMobile ? '15px' : '20px',
           maxWidth: isMobile ? '95%' : '1400px',
@@ -130,10 +133,11 @@ export const ConversationHistoryModal: React.FC<ConversationHistoryModalProps> =
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2 className="modal-title">💬 Conversation History</h2>
+          <h2 id="history-title" className="modal-title">💬 Conversation History</h2>
           <button 
             className="modal-close"
             onClick={onClose}
+            aria-label="Close conversation history"
           >
             Close
           </button>

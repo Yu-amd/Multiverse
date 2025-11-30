@@ -1,3 +1,5 @@
+import { createAppError } from '../types/errors';
+
 export interface ErrorDetails {
   message: string;
   type: 'network' | 'http' | 'timeout' | 'cors' | 'unknown';
@@ -5,9 +7,18 @@ export interface ErrorDetails {
   retryable: boolean;
 }
 
+/**
+ * @deprecated Use createAppError from '../types/errors' instead
+ * This function is kept for backward compatibility
+ */
+
+/**
+ * Get friendly error message (backward compatible)
+ * @deprecated Use createAppError for new code
+ */
 export const getFriendlyErrorMessage = (error: unknown): string => {
-  const details = getErrorDetails(error);
-  return details.message;
+  const appError = createAppError(error);
+  return appError.message;
 };
 
 export const getErrorDetails = (error: unknown): ErrorDetails => {

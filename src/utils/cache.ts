@@ -3,6 +3,8 @@
  * Supports TTL, size limits, and cache statistics
  */
 
+import { logger } from './logger';
+
 export interface CacheEntry<T> {
   data: T;
   timestamp: number;
@@ -67,13 +69,11 @@ class ResponseCache {
     const cacheKey = `simple_${Math.abs(hash).toString(36)}`;
     
     // Debug logging in development
-    if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-      console.debug('🔑 Generated simple cache key:', {
-        key: cacheKey,
-        message: normalizedMessage.substring(0, 50),
-        params: normalizedParams
-      });
-    }
+    logger.debug('🔑 Generated simple cache key:', {
+      key: cacheKey,
+      message: normalizedMessage.substring(0, 50),
+      params: normalizedParams
+    });
     
     return cacheKey;
   }
@@ -118,14 +118,12 @@ class ResponseCache {
     const cacheKey = `cache_${Math.abs(hash).toString(36)}`;
     
     // Debug logging in development
-    if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-      console.debug('🔑 Generated cache key:', {
-        key: cacheKey,
-        messageCount: normalizedMessages.length,
-        messages: normalizedMessages.map(m => ({ role: m.role, content: m.content.substring(0, 30) })),
-        params: normalizedParams
-      });
-    }
+    logger.debug('🔑 Generated cache key:', {
+      key: cacheKey,
+      messageCount: normalizedMessages.length,
+      messages: normalizedMessages.map(m => ({ role: m.role, content: m.content.substring(0, 30) })),
+      params: normalizedParams
+    });
     
     return cacheKey;
   }
@@ -139,7 +137,7 @@ class ResponseCache {
 
     if (!entry) {
       if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-        console.debug('❌ Simple cache miss - no entry found', { 
+        logger.debug('❌ Simple cache miss - no entry found', { 
           key, 
           cacheSize: this.simpleCache.size,
           message: lastMessage.substring(0, 50)
@@ -152,7 +150,7 @@ class ResponseCache {
     if (Date.now() > entry.expiresAt) {
       this.simpleCache.delete(key);
       if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-        console.debug('❌ Simple cache miss - entry expired', { 
+        logger.debug('❌ Simple cache miss - entry expired', { 
           key, 
           expiredAt: new Date(entry.expiresAt).toLocaleTimeString()
         });
@@ -163,7 +161,7 @@ class ResponseCache {
     this.simpleHits++;
     this.saveStatsToLocalStorage();
     if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-      console.log('✅ Simple cache hit!', { 
+      logger.log('✅ Simple cache hit!', { 
         key, 
         age: Math.round((Date.now() - entry.timestamp) / 1000) + 's',
         message: lastMessage.substring(0, 50)
@@ -195,32 +193,30 @@ class ResponseCache {
     if (!entry) {
       this.misses++;
       this.saveStatsToLocalStorage();
-      if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-        const normalizedMessages = messages.map(m => ({
-          role: m.role,
-          content: typeof m.content === 'string' ? m.content.trim().substring(0, 50) : String(m.content || '').trim().substring(0, 50)
-        }));
-        console.log('❌ Cache miss - no entry found', { 
-          key, 
-          cacheSize: this.cache.size,
-          messageCount: messages.length,
-          messages: normalizedMessages,
-          params
-        });
-        // Log all cache keys for debugging
-        const allKeys = Array.from(this.cache.keys());
-        console.log('Available cache keys:', allKeys.slice(0, 10));
-        // Log first few cache entries for comparison
-        if (this.cache.size > 0) {
-          const entries = Array.from(this.cache.entries()).slice(0, 3);
-          entries.forEach(([k, v]) => {
-            console.log('Cache entry:', {
-              key: k,
-              timestamp: new Date(v.timestamp).toLocaleTimeString(),
-              expiresAt: new Date(v.expiresAt).toLocaleTimeString()
-            });
+      const normalizedMessages = messages.map(m => ({
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content.trim().substring(0, 50) : String(m.content || '').trim().substring(0, 50)
+      }));
+      logger.log('❌ Cache miss - no entry found', { 
+        key, 
+        cacheSize: this.cache.size,
+        messageCount: messages.length,
+        messages: normalizedMessages,
+        params
+      });
+      // Log all cache keys for debugging
+      const allKeys = Array.from(this.cache.keys());
+      logger.log('Available cache keys:', allKeys.slice(0, 10));
+      // Log first few cache entries for comparison
+      if (this.cache.size > 0) {
+        const entries = Array.from(this.cache.entries()).slice(0, 3);
+        entries.forEach(([k, v]) => {
+          logger.log('Cache entry:', {
+            key: k,
+            timestamp: new Date(v.timestamp).toLocaleTimeString(),
+            expiresAt: new Date(v.expiresAt).toLocaleTimeString()
           });
-        }
+        });
       }
       return null;
     }
@@ -231,7 +227,7 @@ class ResponseCache {
       this.misses++;
       this.saveStatsToLocalStorage();
       if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-        console.log('❌ Cache miss - entry expired', { 
+        logger.log('❌ Cache miss - entry expired', { 
           key, 
           expiredAt: new Date(entry.expiresAt).toLocaleTimeString(),
           now: new Date().toLocaleTimeString()
@@ -243,7 +239,7 @@ class ResponseCache {
     this.hits++;
     this.saveStatsToLocalStorage();
     if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-      console.log('✅ Cache hit!', { 
+      logger.log('✅ Cache hit!', { 
         key, 
         age: Math.round((Date.now() - entry.timestamp) / 1000) + 's',
         messageCount: messages.length
@@ -263,7 +259,7 @@ class ResponseCache {
       if (oldestKey) {
         this.simpleCache.delete(oldestKey);
         if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-          console.debug('🗑️ Simple cache evicted oldest entry', { key: oldestKey });
+          logger.debug('🗑️ Simple cache evicted oldest entry', { key: oldestKey });
         }
       }
     }
@@ -281,7 +277,7 @@ class ResponseCache {
     this.saveToLocalStorage();
     
     if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-      console.log('💾 Response cached in simple cache', { 
+      logger.log('💾 Response cached in simple cache', { 
         key, 
         cacheSize: this.simpleCache.size,
         message: lastMessage.substring(0, 50),
@@ -312,7 +308,7 @@ class ResponseCache {
       if (oldestKey) {
         this.cache.delete(oldestKey);
         if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-          console.debug('🗑️ Cache evicted oldest entry', { key: oldestKey });
+          logger.debug('🗑️ Cache evicted oldest entry', { key: oldestKey });
         }
       }
     }
@@ -332,7 +328,7 @@ class ResponseCache {
         role: m.role,
         content: typeof m.content === 'string' ? m.content.trim().substring(0, 50) : String(m.content || '').trim().substring(0, 50)
       }));
-      console.log('💾 Response cached in full-context cache', { 
+      logger.log('💾 Response cached in full-context cache', { 
         key, 
         cacheSize: this.cache.size,
         messageCount: messages.length,
@@ -385,7 +381,7 @@ class ResponseCache {
         localStorage.removeItem(this.STORAGE_KEY);
         localStorage.removeItem(this.STATS_STORAGE_KEY);
       } catch (error) {
-        console.warn('Failed to clear cache from localStorage:', error);
+        logger.warn('Failed to clear cache from localStorage:', error);
       }
     }
   }
@@ -474,13 +470,13 @@ class ResponseCache {
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data));
       
       if (import.meta.env?.DEV) {
-        console.debug('💾 Cache saved to localStorage', {
+        logger.debug('💾 Cache saved to localStorage', {
           fullContextEntries: cacheData.length,
           simpleEntries: simpleCacheData.length
         });
       }
     } catch (error) {
-      console.warn('Failed to save cache to localStorage:', error);
+      logger.warn('Failed to save cache to localStorage:', error);
     }
   }
 
@@ -494,7 +490,7 @@ class ResponseCache {
       const stored = localStorage.getItem(this.STORAGE_KEY);
       if (!stored) {
         if (import.meta.env?.DEV) {
-          console.debug('No cached data found in localStorage');
+          logger.debug('No cached data found in localStorage');
         }
         return;
       }
@@ -539,12 +535,12 @@ class ResponseCache {
           this.simpleHits = stats.simpleHits || 0;
           this.misses = stats.misses || 0;
         } catch (e) {
-          console.warn('Failed to load cache statistics:', e);
+          logger.warn('Failed to load cache statistics:', e);
         }
       }
       
       if (import.meta.env?.DEV) {
-        console.log('✅ Cache loaded from localStorage', {
+        logger.log('✅ Cache loaded from localStorage', {
           fullContextEntries: loadedFullContext,
           simpleEntries: loadedSimple,
           expiredFullContext,
@@ -553,7 +549,7 @@ class ResponseCache {
         });
       }
     } catch (error) {
-      console.warn('Failed to load cache from localStorage:', error);
+      logger.warn('Failed to load cache from localStorage:', error);
     }
   }
 
@@ -572,7 +568,7 @@ class ResponseCache {
       };
       localStorage.setItem(this.STATS_STORAGE_KEY, JSON.stringify(stats));
     } catch (error) {
-      console.warn('Failed to save cache statistics to localStorage:', error);
+      logger.warn('Failed to save cache statistics to localStorage:', error);
     }
   }
 

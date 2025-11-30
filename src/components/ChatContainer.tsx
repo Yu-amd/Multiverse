@@ -1,8 +1,10 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { Message } from '../types';
 import { useChat } from '../hooks/useChat';
 import { renderMarkdown } from '../utils/markdown';
 import { VirtualizedMessages, type VirtualizedMessagesRef } from './VirtualizedMessages';
+import { useProfiles } from '../hooks/useProfiles';
+import type { PromptSet } from '../types/profiles';
 
 interface ChatContainerProps {
   messages: Message[];
@@ -24,6 +26,7 @@ interface ChatContainerProps {
   onOpenDashboard: () => void;
   onOpenHistory: () => void;
   handleDeleteMessage: (messageId: string) => void;
+  onStopGenerationRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 export const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -45,10 +48,27 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
   onOpenSettings,
   onOpenDashboard,
   onOpenHistory,
-  handleDeleteMessage
+  handleDeleteMessage,
+  onStopGenerationRef
 }) => {
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const virtualizedMessagesRef = useRef<VirtualizedMessagesRef>(null);
+  
+  // Prompt set management
+  const { profiles } = useProfiles();
+  const [selectedPromptSetId, setSelectedPromptSetId] = useState<string | null>(null);
+  const [currentPromptIndex, setCurrentPromptIndex] = useState<number>(0);
+  const [isRunningPromptSet, setIsRunningPromptSet] = useState(false);
+  
+  // Find the active profile (if any) to get its prompt sets
+  const activeProfile = profiles.find(p => 
+    p.endpoint === customEndpoint && 
+    p.apiKey === (apiKey || undefined) &&
+    p.temperature === temperature &&
+    p.maxTokens === maxTokens &&
+    p.topP === topP
+  );
+  const availablePromptSets = activeProfile?.promptSets || [];
 
   const {
     inputMessage,
@@ -82,6 +102,113 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     recordMetrics,
     recordError
   });
+
+  // Store prompt set queue for sequential execution
+  const promptSetQueueRef = useRef<{ prompts: string[]; name: string; currentIndex: number } | null>(null);
+  const lastProcessedAssistantMessageIdRef = useRef<string | null>(null);
+  const isProcessingNextPromptRef = useRef<boolean>(false);
+  
+  // Track if we should auto-send when inputMessage is set by prompt set
+  const shouldAutoSendRef = useRef<boolean>(false);
+  
+  // Auto-send when inputMessage is set by prompt set execution
+  useEffect(() => {
+    if (shouldAutoSendRef.current && inputMessage.trim() && !isLoading && isRunningPromptSet) {
+      shouldAutoSendRef.current = false;
+      // Small delay to ensure state is stable
+      setTimeout(() => {
+        handleSendMessage();
+      }, 50);
+    }
+  }, [inputMessage, isLoading, isRunningPromptSet, handleSendMessage]);
+  
+  // Sequential prompt set execution
+  const runPromptSet = useCallback((promptSet: PromptSet) => {
+    if (isLoading || isRunningPromptSet) return;
+    
+    setIsRunningPromptSet(true);
+    setCurrentPromptIndex(0);
+    isProcessingNextPromptRef.current = false;
+    lastProcessedAssistantMessageIdRef.current = null;
+    
+    // Find the last assistant message ID before we start (if any)
+    const lastAssistantMessage = [...messages].reverse().find(m => m.role === 'assistant');
+    if (lastAssistantMessage) {
+      lastProcessedAssistantMessageIdRef.current = lastAssistantMessage.id;
+    }
+    
+    promptSetQueueRef.current = {
+      prompts: promptSet.prompts,
+      name: promptSet.name,
+      currentIndex: 0
+    };
+    
+    // Start with first prompt
+    const firstPrompt = promptSet.prompts[0];
+    if (!firstPrompt.trim()) {
+      setIsRunningPromptSet(false);
+      return;
+    }
+    
+    // Set flag to auto-send, then set the message
+    shouldAutoSendRef.current = true;
+    setInputMessage(firstPrompt);
+  }, [isLoading, isRunningPromptSet, messages]);
+  
+  // Watch for new assistant messages to know when to send next prompt
+  useEffect(() => {
+    if (!promptSetQueueRef.current || !isRunningPromptSet || isProcessingNextPromptRef.current || isLoading || isThinking) {
+      return;
+    }
+    
+    // Find the most recent assistant message
+    const lastAssistantMessage = [...messages].reverse().find(m => m.role === 'assistant');
+    
+    // Check if we have a new assistant message that we haven't processed yet
+    if (lastAssistantMessage && 
+        lastAssistantMessage.id !== lastProcessedAssistantMessageIdRef.current) {
+      
+      // This is a new assistant response, mark it as processed
+      lastProcessedAssistantMessageIdRef.current = lastAssistantMessage.id;
+      
+      const queue = promptSetQueueRef.current;
+      const nextIndex = queue.currentIndex + 1;
+      
+      if (nextIndex < queue.prompts.length) {
+        // Mark that we're processing to prevent duplicate triggers
+        isProcessingNextPromptRef.current = true;
+        queue.currentIndex = nextIndex;
+        
+        // Wait a bit before sending next prompt
+        setTimeout(() => {
+          setCurrentPromptIndex(nextIndex);
+          // Set flag to auto-send, then set the message
+          shouldAutoSendRef.current = true;
+          setInputMessage(queue.prompts[nextIndex]);
+          // Reset processing flag after a delay to allow next iteration
+          setTimeout(() => {
+            isProcessingNextPromptRef.current = false;
+          }, 500);
+        }, 1000);
+      } else {
+        // All prompts completed
+        setIsRunningPromptSet(false);
+        setCurrentPromptIndex(0);
+        setSelectedPromptSetId(null);
+        promptSetQueueRef.current = null;
+        lastProcessedAssistantMessageIdRef.current = null;
+        isProcessingNextPromptRef.current = false;
+        showToast(`Completed prompt set "${queue.name}"`, 'success');
+      }
+    }
+  }, [messages, isLoading, isThinking, isRunningPromptSet, handleSendMessage, showToast]);
+
+  const handlePromptSetSelect = (promptSetId: string) => {
+    const promptSet = availablePromptSets.find(ps => ps.id === promptSetId);
+    if (promptSet && !isLoading && !isRunningPromptSet) {
+      runPromptSet(promptSet);
+    }
+  };
 
   // Auto-scroll to bottom when new messages arrive
   const scrollToBottom = useCallback(() => {
@@ -169,6 +296,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     };
   }, [isThinking, isLoading, throttledScrollToBottom]);
 
+  // Expose stop generation function for keyboard shortcuts
+  useEffect(() => {
+    if (onStopGenerationRef) {
+      onStopGenerationRef.current = handleStopGeneration;
+    }
+  }, [handleStopGeneration, onStopGenerationRef]);
+
   return (
     <div className="chat-container">
       <div style={{ marginBottom: '20px' }}>
@@ -181,52 +315,103 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
           <button 
             className="control-button"
             onClick={onOpenSettings}
+            aria-label="Open settings"
           >
             ⚙️ Settings
           </button>
           <button 
             className="control-button"
             onClick={onOpenDashboard}
+            aria-label="Open performance dashboard"
           >
             📊 Dashboard
           </button>
           <button 
             className="control-button"
             onClick={onOpenHistory}
+            aria-label="Open conversation history"
           >
             💬 History
           </button>
           <button 
             className="clear-button"
             onClick={onClearChat}
+            aria-label="Clear chat conversation"
           >
             🗑️ Clear
           </button>
         </div>
       </div>
 
-      <div className="chat-messages" ref={chatMessagesRef} style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div className="chat-messages" ref={chatMessagesRef} style={{ 
+        height: '100%', 
+        overflowY: 'auto', 
+        overflowX: 'hidden',
+        display: 'flex', 
+        flexDirection: 'column',
+        position: 'relative'
+      }}>
         <VirtualizedMessages
           ref={virtualizedMessagesRef}
           messages={messages}
           renderMessage={(message, index) => {
             const isEditing = editingMessageId === message.id;
             const isError = message.content.startsWith('Error:');
-            const canRetry = isError && lastError?.messageId === message.id;
+            const canRetry = isError && lastError?.messageId === message.id && lastError.error.retryable;
+            const errorInfo = canRetry ? lastError.error : null;
             
             return (
               <div key={message.id} className={`message ${message.role}`} style={{ position: 'relative', paddingRight: '80px' }}>
-                {showTimestamps && (
+                {(showTimestamps || message.metrics) && (
                   <div style={{ 
                     fontSize: '0.75rem', 
                     color: 'var(--text-secondary)', 
                     marginBottom: '4px',
-                    opacity: 0.8
+                    opacity: 0.8,
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '8px',
+                    alignItems: 'center'
                   }}>
-                    {message.timestamp.toLocaleString()}
-                    {message.edited && (
-                      <span style={{ marginLeft: '8px', fontSize: '0.7rem', fontStyle: 'italic' }}>
-                        (edited)
+                    {showTimestamps && (
+                      <span>
+                        {message.timestamp.toLocaleString()}
+                        {message.edited && (
+                          <span style={{ marginLeft: '4px', fontSize: '0.7rem', fontStyle: 'italic' }}>
+                            (edited)
+                          </span>
+                        )}
+                      </span>
+                    )}
+                    {message.metrics && message.role === 'assistant' && (
+                      <span style={{ 
+                        display: 'inline-flex', 
+                        gap: '8px',
+                        fontSize: '0.7rem',
+                        padding: '2px 6px',
+                        background: 'var(--bg-secondary)',
+                        borderRadius: '4px'
+                      }}>
+                        {message.metrics.timeToFirstToken !== undefined && (
+                          <span title="Time to first token">
+                            ⚡ {(message.metrics.timeToFirstToken / 1000).toFixed(2)}s
+                          </span>
+                        )}
+                        {message.metrics.tokensPerSecond !== undefined && (
+                          <span title="Tokens per second">
+                            🚀 {message.metrics.tokensPerSecond.toFixed(1)} tok/s
+                          </span>
+                        )}
+                        {message.metrics.totalTime !== undefined && (
+                          <span title="Total response time">
+                            ⏱️ {(message.metrics.totalTime / 1000).toFixed(2)}s
+                          </span>
+                        )}
+                        {(message.metrics.tokensIn !== undefined || message.metrics.tokensOut !== undefined) && (
+                          <span title="Token counts">
+                            📊 {message.metrics.tokensIn || 0}→{message.metrics.tokensOut || 0}
+                          </span>
+                        )}
                       </span>
                     )}
                   </div>
@@ -236,6 +421,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                     <textarea
                       value={editContent}
                       onChange={(e) => setEditContent(e.target.value)}
+                      aria-label="Edit message"
                       style={{
                         width: '100%',
                         minHeight: '80px',
@@ -260,6 +446,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                       <button
                         onClick={() => handleSaveEdit(message.id)}
                         disabled={!editContent.trim() || editContent.trim() === message.content}
+                        aria-label="Save edited message and regenerate response"
+                        aria-disabled={!editContent.trim() || editContent.trim() === message.content}
                         style={{
                           padding: '6px 12px',
                           borderRadius: '4px',
@@ -275,6 +463,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                       </button>
                       <button
                         onClick={handleCancelEdit}
+                        aria-label="Cancel editing message"
                         style={{
                           padding: '6px 12px',
                           borderRadius: '4px',
@@ -298,22 +487,78 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         lineHeight: '1.5'
                       }}
                     />
-                    {canRetry && (
-                      <div style={{ marginTop: '8px', padding: '8px', background: 'var(--error-color)', borderRadius: '4px', color: '#fff', fontSize: '0.85rem' }}>
-                        <div style={{ marginBottom: '4px' }}>Request failed. Would you like to retry?</div>
+                    {canRetry && errorInfo && (
+                      <div style={{ 
+                        marginTop: '8px', 
+                        padding: '12px', 
+                        background: 'var(--error-color)', 
+                        borderRadius: '6px', 
+                        color: '#fff', 
+                        fontSize: '0.85rem',
+                        border: '1px solid rgba(255, 255, 255, 0.2)'
+                      }}>
+                        <div style={{ marginBottom: '8px', fontWeight: 500 }}>
+                          {errorInfo.type === 'rate_limit' 
+                            ? '⏱️ Rate limit exceeded'
+                            : errorInfo.type === 'network'
+                            ? '🌐 Network error'
+                            : errorInfo.type === 'timeout'
+                            ? '⏰ Request timeout'
+                            : errorInfo.type === 'server'
+                            ? '🔧 Server error'
+                            : '❌ Request failed'}
+                        </div>
+                        <div style={{ marginBottom: '8px', opacity: 0.9, fontSize: '0.8rem' }}>
+                          {errorInfo.message}
+                        </div>
+                        {errorInfo.type === 'rate_limit' && errorInfo.retryAfter && (
+                          <div style={{ 
+                            marginBottom: '8px', 
+                            padding: '6px',
+                            background: 'rgba(255, 255, 255, 0.1)',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem'
+                          }}>
+                            ⏳ Retry after {errorInfo.retryAfter} seconds
+                          </div>
+                        )}
+                        {lastError.retryAttempt > 0 && (
+                          <div style={{ 
+                            marginBottom: '8px', 
+                            fontSize: '0.75rem',
+                            opacity: 0.8
+                          }}>
+                            Retry attempt: {lastError.retryAttempt} / 3
+                          </div>
+                        )}
                         <button
                           onClick={handleRetry}
+                          disabled={isLoading}
+                          aria-label="Retry failed request"
                           style={{
-                            padding: '4px 12px',
+                            padding: '6px 16px',
                             borderRadius: '4px',
                             border: '1px solid #fff',
-                            background: 'transparent',
+                            background: isLoading ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.2)',
                             color: '#fff',
-                            cursor: 'pointer',
-                            fontSize: '0.85rem'
+                            cursor: isLoading ? 'not-allowed' : 'pointer',
+                            fontSize: '0.85rem',
+                            fontWeight: 500,
+                            transition: 'all 0.2s',
+                            opacity: isLoading ? 0.6 : 1
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isLoading) {
+                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isLoading) {
+                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
+                            }
                           }}
                         >
-                          🔄 Retry
+                          {isLoading ? '⏳ Retrying...' : '🔄 Retry'}
                         </button>
                       </div>
                     )}
@@ -328,6 +573,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 }}>
                   <button
                     onClick={(e) => handleCopyMessage(message.content, e)}
+                    aria-label={`Copy ${message.role} message to clipboard`}
                     style={{
                       background: 'transparent',
                       border: '1px solid var(--border-color)',
@@ -354,6 +600,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                   {message.role === 'user' && !isEditing && (
                     <button
                       onClick={() => handleStartEdit(message.id)}
+                      aria-label="Edit this message"
                       style={{
                         background: 'transparent',
                         border: '1px solid var(--border-color)',
@@ -381,6 +628,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                   {message.role === 'assistant' && index === messages.length - 1 && !isError && (
                     <button
                       onClick={handleRegenerateResponse}
+                      aria-label="Regenerate AI response"
                       style={{
                         background: 'transparent',
                         border: '1px solid var(--border-color)',
@@ -441,7 +689,19 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         
         {/* Thinking Section */}
         {isThinking && thinkingContent && (
-          <div ref={thinkingSectionRef} className="thinking-section">
+          <div 
+            ref={thinkingSectionRef} 
+            className="thinking-section" 
+            role="status" 
+            aria-live="polite" 
+            aria-label="AI thinking process"
+            style={{
+              position: 'relative',
+              zIndex: 1,
+              marginTop: '10px',
+              flexShrink: 0
+            }}
+          >
             <div className="thinking-header">
               🤔 Thinking...
             </div>
@@ -458,7 +718,19 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         
         {/* Response Section */}
         {responseContent && (
-          <div ref={responseSectionRef} className="response-section">
+          <div 
+            ref={responseSectionRef} 
+            className="response-section" 
+            role="status" 
+            aria-live="polite" 
+            aria-label="AI response"
+            style={{
+              position: 'relative',
+              zIndex: 1,
+              marginTop: '10px',
+              flexShrink: 0
+            }}
+          >
             <div className="response-header">
               💬 Response
             </div>
@@ -475,29 +747,93 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
       </div>
 
       <div className="chat-input-area">
-        {/* Connection Status Indicator */}
-        {connectionStatus !== 'online' && (
-          <div style={{
+        {/* Connection Status Indicator - Only show when actually offline, not when checking */}
+        {connectionStatus === 'offline' && (
+          <div role="alert" aria-live="assertive" style={{
             padding: '8px 12px',
             marginBottom: '10px',
             borderRadius: '6px',
-            background: connectionStatus === 'offline' ? 'var(--error-color)' : 'var(--warning-color)',
+            background: 'var(--error-color)',
             color: '#fff',
             fontSize: '0.85rem',
             display: 'flex',
             alignItems: 'center',
             gap: '8px'
           }}>
-            <span>
-              {connectionStatus === 'offline' ? '🔴' : '🟡'}
-            </span>
-            <span>
-              {connectionStatus === 'offline' 
-                ? 'Connection offline. Please check your network and endpoint.' 
-                : 'Checking connection...'}
-            </span>
+            <span aria-hidden="true">🔴</span>
+            <span>Connection offline. Please check your network and endpoint.</span>
           </div>
         )}
+        
+        {/* Prompt Set Selector */}
+        {availablePromptSets.length > 0 && (
+          <div style={{
+            marginBottom: '10px',
+            display: 'flex',
+            gap: '8px',
+            alignItems: 'center',
+            flexWrap: 'wrap'
+          }}>
+            <label style={{
+              fontSize: '0.85rem',
+              color: 'var(--text-secondary)',
+              whiteSpace: 'nowrap'
+            }}>
+              Prompt Set:
+            </label>
+            <select
+              value={selectedPromptSetId || ''}
+              onChange={(e) => {
+                if (e.target.value) {
+                  setSelectedPromptSetId(e.target.value);
+                  // Automatically start running the selected prompt set
+                  const promptSet = availablePromptSets.find(ps => ps.id === e.target.value);
+                  if (promptSet && !isLoading && !isRunningPromptSet) {
+                    handlePromptSetSelect(e.target.value);
+                  }
+                } else {
+                  setSelectedPromptSetId(null);
+                }
+              }}
+              disabled={isLoading || isRunningPromptSet}
+              style={{
+                flex: 1,
+                minWidth: '200px',
+                padding: '6px 10px',
+                borderRadius: '4px',
+                border: '1px solid var(--border-color)',
+                background: 'var(--input-bg)',
+                color: 'var(--text-primary)',
+                fontSize: '0.9rem',
+                cursor: (isLoading || isRunningPromptSet) ? 'not-allowed' : 'pointer',
+                opacity: (isLoading || isRunningPromptSet) ? 0.6 : 1
+              }}
+              aria-label="Select prompt set to run automatically"
+              title="Selecting a prompt set will automatically run all prompts sequentially"
+            >
+              <option value="">-- Select a prompt set --</option>
+              {availablePromptSets.map(promptSet => (
+                <option key={promptSet.id} value={promptSet.id}>
+                  {promptSet.name} ({promptSet.prompts.length} prompts)
+                </option>
+              ))}
+            </select>
+            {isRunningPromptSet && (
+              <div style={{
+                fontSize: '0.8rem',
+                color: 'var(--accent-color)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontWeight: 500
+              }}>
+                <span>⏳ Running...</span>
+                <span>({currentPromptIndex + 1}/{availablePromptSets.find(ps => ps.id === selectedPromptSetId)?.prompts.length || 0})</span>
+              </div>
+            )}
+          </div>
+        )}
+        
         <div className="chat-input-container" style={{ 
           display: 'flex', 
           gap: '10px', 
@@ -510,15 +846,21 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Type your message here..."
+            aria-label="Chat message input"
+            aria-describedby="chat-input-help"
             style={{
               flex: 1,
               resize: 'none'
             }}
           />
+          <span id="chat-input-help" className="sr-only">
+            Type your message and press Enter to send, or Shift+Enter for a new line
+          </span>
           {isLoading ? (
             <button 
               className="stop-button"
               onClick={handleStopGeneration}
+              aria-label="Stop response generation"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -546,6 +888,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
               className="send-button"
               onClick={handleSendMessage} 
               disabled={!inputMessage.trim()}
+              aria-label="Send message"
+              aria-disabled={!inputMessage.trim()}
               style={{
                 display: 'flex',
                 alignItems: 'center',

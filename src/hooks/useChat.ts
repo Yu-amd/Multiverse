@@ -1,8 +1,11 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { Message } from '../types';
-import { getFriendlyErrorMessage, isRetryableError } from '../utils/errorHandling';
+import { getFriendlyErrorMessage } from '../utils/errorHandling';
+import { createAppError, shouldRetry, getRetryDelay, type AppError } from '../types/errors';
 import { renderMarkdown } from '../utils/markdown';
 import { responseCache } from '../utils/cache';
+import { logger } from '../utils/logger';
+import { validateStreamingChunk } from '../schemas/llm';
 
 interface UseChatProps {
   messages: Message[];
@@ -36,7 +39,7 @@ export const useChat = ({
   const [responseContent, setResponseContent] = useState('');
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState<string>('');
-  const [lastError, setLastError] = useState<{ messageId: string; userMessage: Message; error: Error } | null>(null);
+  const [lastError, setLastError] = useState<{ messageId: string; userMessage: Message; error: AppError; retryAttempt: number } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const handleStopGeneration = () => {
@@ -54,7 +57,7 @@ export const useChat = ({
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
     
-    console.log('Starting message send...');
+    logger.log('Starting message send...');
     
     const newMessage: Message = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
@@ -88,7 +91,7 @@ export const useChat = ({
       // Note: For streaming requests, we can't use cache directly, but we can check
       // if we have a cached non-streaming response for the same prompt
       const messagesForCache = [...messages, newMessage];
-      console.log('🔍 Checking cache...', {
+      logger.log('🔍 Checking cache...', {
         messageCount: messagesForCache.length,
         lastMessage: messagesForCache[messagesForCache.length - 1]?.content?.substring(0, 50),
         allMessages: messagesForCache.map(m => ({ role: m.role, content: m.content?.substring(0, 30) }))
@@ -107,7 +110,7 @@ export const useChat = ({
 
       // If we have a cached response, use it instead of making an API call
       if (cachedResponse && cachedResponse.content) {
-        console.log('✅ Cache hit! Using cached response', {
+        logger.log('✅ Cache hit! Using cached response', {
           contentLength: cachedResponse.content.length,
           timestamp: new Date(cachedResponse.timestamp).toLocaleTimeString()
         });
@@ -158,12 +161,12 @@ export const useChat = ({
         return; // Exit early, don't make API call
       }
       
-      console.log('❌ Cache miss - making API request', {
+      logger.log('❌ Cache miss - making API request', {
         endpoint,
         messageCount: messages.length + 1,
         params: { temperature, max_tokens: maxTokens, top_p: topP }
       });
-      console.log('Request payload:', request);
+      logger.log('Request payload:', request);
 
       // Add timeout to prevent hanging requests
       const controller = new AbortController();
@@ -182,12 +185,12 @@ export const useChat = ({
 
       clearTimeout(timeoutId);
 
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
+      logger.log('Response status:', response.status);
+      logger.log('Response headers:', response.headers);
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Response error:', errorText);
+        logger.error('Response error:', errorText);
         throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
 
@@ -200,6 +203,39 @@ export const useChat = ({
       let accumulatedThinking = '';
       let inThinkingMode = false;
       const decoder = new TextDecoder();
+      
+      // Streaming throttle: buffer tokens and render every 30-50ms
+      let contentBuffer = '';
+      let thinkingBuffer = '';
+      let lastUpdateTime = Date.now();
+      const THROTTLE_INTERVAL = 40; // 40ms = ~25fps, smooth but not too frequent
+      let throttleTimer: number | null = null;
+      
+      const flushBuffers = () => {
+        if (contentBuffer) {
+          accumulatedContent += contentBuffer;
+          setResponseContent(accumulatedContent);
+          contentBuffer = '';
+        }
+        if (thinkingBuffer) {
+          accumulatedThinking += thinkingBuffer;
+          setThinkingContent(accumulatedThinking);
+          thinkingBuffer = '';
+        }
+        lastUpdateTime = Date.now();
+        throttleTimer = null;
+      };
+      
+      const scheduleUpdate = () => {
+        if (throttleTimer === null) {
+          const timeSinceLastUpdate = Date.now() - lastUpdateTime;
+          const delay = Math.max(0, THROTTLE_INTERVAL - timeSinceLastUpdate);
+          
+          throttleTimer = window.setTimeout(() => {
+            flushBuffers();
+          }, delay);
+        }
+      };
 
       // Thinking markers
       const thinkingStartMarkers = [
@@ -215,20 +251,20 @@ export const useChat = ({
         'in conclusion', 'so the answer', 'here\'s what i found'
       ];
 
-      console.log('Starting to read stream...');
+      logger.log('Starting to read stream...');
       let chunkCount = 0;
       let hasReceivedContent = false;
       
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
-          console.log('Stream completed');
+          logger.log('Stream completed');
           break;
         }
 
         chunkCount++;
         const chunk = decoder.decode(value);
-        console.log(`Chunk ${chunkCount}:`, chunk.substring(0, 100) + (chunk.length > 100 ? '...' : ''));
+        logger.log(`Chunk ${chunkCount}:`, chunk.substring(0, 100) + (chunk.length > 100 ? '...' : ''));
         const lines = chunk.split('\n').filter(line => line.trim() !== '');
 
         for (const line of lines) {
@@ -237,7 +273,8 @@ export const useChat = ({
             if (data === '[DONE]') continue;
 
             try {
-              const parsed = JSON.parse(data);
+              // Validate with Zod schema
+              const parsed = validateStreamingChunk(JSON.parse(data));
               if (parsed.choices[0]?.delta?.content) {
                 const content = parsed.choices[0].delta.content;
 
@@ -277,13 +314,13 @@ export const useChat = ({
 
                 if (inThinkingMode) {
                   const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '');
-                  accumulatedThinking += cleanContent;
-                  setThinkingContent(accumulatedThinking);
+                  thinkingBuffer += cleanContent;
+                  scheduleUpdate();
                   hasReceivedContent = true;
                 } else {
                   const cleanContent = content.replace(/<think>|<\/think>|<thinking>|<\/thinking>/gi, '');
-                  accumulatedContent += cleanContent;
-                  setResponseContent(accumulatedContent);
+                  contentBuffer += cleanContent;
+                  scheduleUpdate();
                   hasReceivedContent = true;
                   
                   if (!hasReceivedContent) {
@@ -292,15 +329,22 @@ export const useChat = ({
                 }
               }
             } catch (e) {
-              console.error('Error parsing stream chunk:', e);
+              logger.error('Error parsing stream chunk:', e);
             }
           }
         }
       }
 
+      // Flush any remaining buffered content
+      if (throttleTimer !== null) {
+        clearTimeout(throttleTimer);
+        throttleTimer = null;
+      }
+      flushBuffers();
+      
       // Check if we received any content
       if (!hasReceivedContent) {
-        console.warn('No content received from stream, adding fallback message');
+        logger.warn('No content received from stream, adding fallback message');
         accumulatedContent = 'I apologize, but I encountered an issue processing your request. Please try again.';
       }
 
@@ -322,7 +366,7 @@ export const useChat = ({
       // This matches what we used for the cache check
       try {
         const messagesForCache = [...messages, newMessage];
-        console.log('💾 Storing in cache...', {
+        logger.log('💾 Storing in cache...', {
           messageCount: messagesForCache.length,
           lastMessage: messagesForCache[messagesForCache.length - 1]?.content?.substring(0, 50),
           allMessages: messagesForCache.map(m => ({ role: m.role, content: m.content?.substring(0, 30) }))
@@ -343,9 +387,9 @@ export const useChat = ({
           },
           10 * 60 * 1000 // 10 minutes TTL
         );
-        console.log('✅ Response cached successfully');
+        logger.log('✅ Response cached successfully');
       } catch (error) {
-        console.warn('❌ Failed to cache response:', error);
+        logger.warn('❌ Failed to cache response:', error);
       }
 
       // Record metrics for successful inference
@@ -363,7 +407,7 @@ export const useChat = ({
           tokensPerSecond
         );
         
-        console.log('Inference completed:', {
+        logger.log('Inference completed:', {
           promptLength: currentInput.length,
           responseLength: accumulatedContent.length,
           totalTime,
@@ -371,64 +415,63 @@ export const useChat = ({
           tokensPerSecond
         });
       } catch (error) {
-        console.error('Error recording metrics:', error);
+        logger.error('Error recording metrics:', error);
       }
 
     } catch (error) {
-      console.error('Error sending message:', error);
+      logger.error('Error sending message:', error);
       
-      let errorMessage = 'Unknown error occurred';
-      if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          errorMessage = 'Request timed out. Please try again.';
-        } else {
-          errorMessage = error.message;
+      // Create structured AppError
+      const appError = createAppError(error, { endpoint: customEndpoint });
+      
+      // Check if error was due to abort (user stopped)
+      if (appError.type === 'timeout' && error instanceof DOMException && error.name === 'AbortError') {
+        // Check if this was a user-initiated abort (not timeout)
+        const wasUserAbort = abortControllerRef.current === null;
+        if (wasUserAbort) {
+          setMessages(prev => [
+            ...prev,
+            {
+              id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+              role: 'assistant' as const,
+              content: 'Generation stopped by user.',
+              timestamp: new Date(),
+              edited: false,
+            } as Message,
+          ]);
+          showToast('Generation stopped', 'info');
+          return;
         }
       }
       
-      // Check if error was due to abort
-      if (error instanceof Error && error.name === 'AbortError') {
-        setMessages(prev => [
-          ...prev,
-          {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-            role: 'assistant' as const,
-            content: 'Generation stopped by user.',
-            timestamp: new Date(),
-            edited: false,
-          } as Message,
-        ]);
-        showToast('Generation stopped', 'info');
-      } else {
-        // Store error message with retry capability
-        const errorMessageId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-        setMessages(prev => [
-          ...prev,
-          {
-            id: errorMessageId,
-            role: 'assistant' as const,
-            content: `Error: ${errorMessage}`,
-            timestamp: new Date(),
-            edited: false,
-          } as Message,
-        ]);
-        
-        // Show user-friendly error message
-        const friendlyError = getFriendlyErrorMessage(error);
-        showToast(friendlyError, 'error');
-        
+      // Store error message with retry capability
+      const errorMessageId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: errorMessageId,
+          role: 'assistant' as const,
+          content: `Error: ${appError.message}`,
+          timestamp: new Date(),
+          edited: false,
+        } as Message,
+      ]);
+      
+      // Show user-friendly error message
+      showToast(appError.message, 'error');
+      
         // Store error info for retry (only if retryable)
-        if (isRetryableError(error)) {
+        if (appError.retryable) {
           setLastError({
             messageId: errorMessageId,
             userMessage: newMessage,
-            error: error instanceof Error ? error : new Error(String(error)),
+            error: appError,
+            retryAttempt: lastError?.retryAttempt ?? 0,
           });
         } else {
           // Clear last error if not retryable
           setLastError(null);
         }
-      }
       
       // Record error metrics
       recordError();
@@ -461,7 +504,7 @@ export const useChat = ({
       }
       showToast('Message copied to clipboard', 'success');
     } catch (err) {
-      console.error('Failed to copy message:', err);
+      logger.error('Failed to copy message:', err);
       showToast('Failed to copy to clipboard', 'error');
     }
   };
@@ -593,7 +636,8 @@ export const useChat = ({
             if (data === '[DONE]') continue;
 
             try {
-              const parsed = JSON.parse(data);
+              // Validate with Zod schema
+              const parsed = validateStreamingChunk(JSON.parse(data));
               if (parsed.choices[0]?.delta?.content) {
                 const content = parsed.choices[0].delta.content;
 
@@ -646,7 +690,7 @@ export const useChat = ({
                 }
               }
             } catch (parseError) {
-              console.error('Error parsing JSON:', parseError);
+              logger.error('Error parsing JSON:', parseError);
             }
           }
         }
@@ -680,7 +724,7 @@ export const useChat = ({
       );
 
     } catch (error) {
-      console.error('Error regenerating after edit:', error);
+      logger.error('Error regenerating after edit:', error);
       const friendlyError = getFriendlyErrorMessage(error);
       showToast(friendlyError, 'error');
       
@@ -696,11 +740,15 @@ export const useChat = ({
         } as Message
       ]);
       
-      setLastError({
-        messageId: errorMessageId,
-        userMessage: updatedMessages[messageIndex],
-        error: error instanceof Error ? error : new Error(String(error)),
-      });
+      const appError = createAppError(error, { endpoint: customEndpoint });
+      if (appError.retryable) {
+        setLastError({
+          messageId: errorMessageId,
+          userMessage: updatedMessages[messageIndex],
+          error: appError,
+          retryAttempt: 0,
+        });
+      }
     } finally {
       setIsLoading(false);
       setIsThinking(false);
@@ -713,12 +761,46 @@ export const useChat = ({
   const handleRetry = async () => {
     if (!lastError) return;
 
+    const { error, retryAttempt } = lastError;
+    
+    // Check if we should retry
+    if (!shouldRetry(error, retryAttempt)) {
+      showToast('Maximum retry attempts reached', 'error');
+      setLastError(null);
+      return;
+    }
+
+    // Calculate retry delay
+    const delay = getRetryDelay(error, retryAttempt);
+    
+    // For rate limits, show countdown
+    if (error.type === 'rate_limit' && error.retryAfter) {
+      showToast(`Rate limited. Retrying in ${error.retryAfter} seconds...`, 'info');
+    } else if (delay > 0) {
+      showToast(`Retrying in ${Math.ceil(delay / 1000)} seconds...`, 'info');
+    }
+
+    // Wait for retry delay
+    if (delay > 0) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    // Remove error message
     setMessages(prev => prev.filter(msg => msg.id !== lastError.messageId));
-    setLastError(null);
+    
+    // Increment retry attempt
+    const newRetryAttempt = retryAttempt + 1;
+    
+    // Update lastError with new attempt count (will be cleared on success or final failure)
+    setLastError({
+      ...lastError,
+      retryAttempt: newRetryAttempt,
+    });
 
     const userMessage = lastError.userMessage;
     setInputMessage(userMessage.content);
     
+    // Retry the request
     setTimeout(() => {
       handleSendMessage();
     }, 100);
@@ -842,7 +924,8 @@ export const useChat = ({
             if (data === '[DONE]') continue;
 
             try {
-              const parsed = JSON.parse(data);
+              // Validate with Zod schema
+              const parsed = validateStreamingChunk(JSON.parse(data));
               if (parsed.choices[0]?.delta?.content) {
                 const content = parsed.choices[0].delta.content;
 
@@ -895,7 +978,7 @@ export const useChat = ({
                 }
               }
             } catch (parseError) {
-              console.error('Error parsing JSON:', parseError);
+              logger.error('Error parsing JSON:', parseError);
             }
           }
         }
@@ -929,7 +1012,7 @@ export const useChat = ({
       );
 
     } catch (error) {
-      console.error('Error regenerating response:', error);
+      logger.error('Error regenerating response:', error);
       
       let errorMessage = 'Unknown error occurred';
       if (error instanceof Error) {
@@ -964,13 +1047,16 @@ export const useChat = ({
             edited: false,
           } as Message,
         ]);
-        const friendlyError = getFriendlyErrorMessage(error);
-        showToast(friendlyError, 'error');
-        setLastError({
-          messageId: errorMessageId,
-          userMessage: newMessage,
-          error: error instanceof Error ? error : new Error(String(error)),
-        });
+        const appError = createAppError(error, { endpoint: customEndpoint });
+        showToast(appError.message, 'error');
+        if (appError.retryable) {
+          setLastError({
+            messageId: errorMessageId,
+            userMessage: newMessage,
+            error: appError,
+            retryAttempt: 0,
+          });
+        }
       }
       
       setIsLoading(false);
@@ -979,6 +1065,17 @@ export const useChat = ({
       setResponseContent('');
     }
   };
+
+  // Clear lastError on successful message send
+  useEffect(() => {
+    if (messages.length > 0 && !isLoading) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastError && lastMessage.role === 'assistant' && !lastMessage.content.startsWith('Error:')) {
+        // Successfully sent after retry, clear error
+        setLastError(null);
+      }
+    }
+  }, [messages, isLoading, lastError]);
 
   return {
     inputMessage,
