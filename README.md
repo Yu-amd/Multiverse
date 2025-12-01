@@ -9,10 +9,47 @@ A simplified, responsive AI model playground for testing different AI models acr
 [![CI Status](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
+## Screenshots
+
+<div align="center">
+  <img src="docs/screenshots/desktop.png" alt="Desktop Layout" width="800">
+  <p><em>Desktop layout with full two-column interface</em></p>
+</div>
+
+<div align="center">
+  <img src="docs/screenshots/settings-modal.png" alt="Settings Modal" width="800">
+  <p><em>Settings modal with two-column layout</em></p>
+</div>
+
+<div align="center">
+  <img src="docs/screenshots/settings-modal-aim.png" alt="Settings Modal with AIM" width="800">
+  <p><em>Settings modal showing AMD Inference Microservice (AIM) integration</em></p>
+</div>
+
+<div align="center">
+  <img src="docs/screenshots/dashboard-modal.png" alt="Dashboard" width="800">
+  <p><em>Performance dashboard with real-time metrics</em></p>
+</div>
+
+<div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 20px; margin: 20px 0;">
+  <div>
+    <img src="docs/screenshots/mobile.png" alt="Mobile Layout" width="300">
+    <p align="center"><em>Mobile</em></p>
+  </div>
+  <div>
+    <img src="docs/screenshots/tablet.png" alt="Tablet Layout" width="400">
+    <p align="center"><em>Tablet</em></p>
+  </div>
+  <div>
+    <img src="docs/screenshots/rog-ally-x.png" alt="ROG Ally X Layout" width="400">
+    <p align="center"><em>ROG Ally X</em></p>
+  </div>
+</div>
+
 ## Features
 
 - **Multi-Device Support**: Responsive design for desktop, tablet, and mobile (including ROG Ally X)
-- **Multiple Model Support**: LM Studio, Ollama, and custom OpenAI-compatible endpoints
+- **Multiple Model Support**: LM Studio, Ollama, custom OpenAI-compatible endpoints, and **AMD Inference Microservice (AIM)**
 - **Real-time Streaming**: Live streaming responses with thinking vs response detection
 - **Interactive Chat**: Multi-turn conversations with context preservation
 - **Code Generation**: Auto-generates Python integration code

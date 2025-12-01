@@ -98,12 +98,22 @@ async function captureScreenshots() {
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForSelector('.app-container', { timeout: 10000 });
     await page.locator('button', { hasText: 'Settings' }).click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000); // Wait for modal to fully render
     await page.screenshot({
       path: join(screenshotsDir, 'settings-modal.png'),
       fullPage: false,
     });
     console.log('✅ Settings modal screenshot saved');
+
+    // 5b. Settings Modal with AIM selected
+    console.log('📸 Capturing settings modal with AIM...');
+    await page.locator('select').first().selectOption('AMD Inference Microservice (AIM)');
+    await page.waitForTimeout(500);
+    await page.screenshot({
+      path: join(screenshotsDir, 'settings-modal-aim.png'),
+      fullPage: false,
+    });
+    console.log('✅ Settings modal with AIM screenshot saved');
 
     // 6. Dashboard Modal
     console.log('📸 Capturing dashboard modal...');
