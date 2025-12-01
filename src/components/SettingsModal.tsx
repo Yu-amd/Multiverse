@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { clearAllSessionData } from '../utils/sessionPersistence';
 import { useProfiles } from '../hooks/useProfiles';
 import { useMetricsSampling, type SamplingInterval } from '../hooks/useMetricsSampling';
+import { AIM_CATALOG_MODELS } from '../types/aim';
 
 interface SettingsModalProps {
   showSettings: boolean;
@@ -80,6 +81,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [promptSetName, setPromptSetName] = useState('');
   const [promptSetDescription, setPromptSetDescription] = useState('');
   const [promptSetPrompts, setPromptSetPrompts] = useState<string[]>(['']);
+  
+  // AIM catalog selection
+  const [selectedAimModelId, setSelectedAimModelId] = useState<string | null>(null);
   
   // Metrics sampling
   const savedInterval = localStorage.getItem('multiverse-metrics-interval');
@@ -335,7 +339,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         aria-labelledby="settings-title"
         style={{
           padding: isMobile ? '15px' : '20px',
-          maxWidth: isMobile ? '95%' : '500px',
+          maxWidth: isMobile ? '95%' : '1400px',
           width: '90%',
           maxHeight: isMobile ? '90vh' : '80vh'
         }}
@@ -357,7 +361,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        <div className="form-group">
+        {/* Two-column layout for desktop/tablet */}
+        <div style={{
+          display: isMobile ? 'block' : 'grid',
+          gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+          gap: '20px',
+          alignItems: 'flex-start'
+        }}>
+          {/* Left Column: Provider & Endpoint Configuration */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="form-group" style={{ marginBottom: '0' }}>
           <label className="form-label">
             Model Provider
           </label>
@@ -370,454 +383,93 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               // Auto-update endpoint based on selection
               if (newModel === 'Ollama (Local)') {
                 setCustomEndpoint('http://localhost:11434');
+                setSelectedAimModelId(null);
               } else if (newModel === 'LM Studio (Local)') {
                 setCustomEndpoint('http://localhost:1234');
+                setSelectedAimModelId(null);
+              } else if (newModel === 'AMD Inference Microservice (AIM)') {
+                // Set default AIM endpoint (user will configure cluster domain)
+                setCustomEndpoint('https://aim.<cluster-domain>/v1');
+                setSelectedAimModelId(null);
+              } else {
+                setSelectedAimModelId(null);
               }
             }}
             aria-label="Model provider selection"
           >
             <option value="LM Studio (Local)">LM Studio (Local)</option>
             <option value="Ollama (Local)">Ollama (Local)</option>
+            <option value="AMD Inference Microservice (AIM)">AMD Inference Microservice (AIM) (work in progress)</option>
             <option value="Custom Endpoint">Custom Endpoint</option>
           </select>
         </div>
 
-        {/* Endpoint Profiles */}
-        <div className="form-group">
-          <label className="form-label">
-            Endpoint Profiles
-          </label>
-          <div style={{ marginBottom: '10px' }}>
-            {profiles.length > 0 ? (
-              <select
-                className="form-select"
-                value={selectedProfileId || ''}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    handleSelectProfile(e.target.value);
-                  } else {
-                    setSelectedProfileId(null);
-                  }
-                }}
-                aria-label="Select endpoint profile"
-                style={{ marginBottom: '8px' }}
-              >
-                <option value="">-- No profile selected --</option>
-                {profiles.map(profile => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name} ({profile.endpoint})
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <div className="form-help" style={{ marginBottom: '8px' }}>
-                No profiles saved yet. Save current settings as a profile below.
-              </div>
-            )}
-            
-            {profiles.length > 0 && selectedProfileId && (
-              <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => handleEditProfile(selectedProfileId)}
-                  style={{
-                    padding: '4px 8px',
-                    fontSize: '11px',
-                    background: 'var(--bg-secondary)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '4px',
-                    color: 'var(--text-primary)',
-                    cursor: 'pointer'
-                  }}
-                  aria-label="Edit selected profile"
-                >
-                  ✏️ Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteProfile(selectedProfileId)}
-                  style={{
-                    padding: '4px 8px',
-                    fontSize: '11px',
-                    background: 'var(--bg-secondary)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '4px',
-                    color: 'var(--error-color)',
-                    cursor: 'pointer'
-                  }}
-                  aria-label="Delete selected profile"
-                >
-                  🗑️ Delete
-                </button>
-              </div>
-            )}
-          </div>
-          
-          {!showProfileForm ? (
-            <button
-              type="button"
-              onClick={() => {
-                setShowProfileForm(true);
-                setEditingProfileId(null);
-                setProfileName('');
-              }}
-              style={{
-                padding: '6px 12px',
-                fontSize: '12px',
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                color: 'var(--text-primary)',
-                cursor: 'pointer',
-                width: '100%'
-              }}
-              aria-label="Save current settings as profile"
-            >
-              💾 Save Current Settings as Profile
-            </button>
-          ) : (
-            <div style={{ 
-              padding: '10px',
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '4px'
-            }}>
-              <input
-                type="text"
-                value={profileName}
-                onChange={(e) => setProfileName(e.target.value)}
-                placeholder="Profile name"
-                className="form-input"
-                style={{ marginBottom: '8px' }}
-                aria-label="Profile name"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    if (editingProfileId) {
-                      handleUpdateProfile();
-                    } else {
-                      handleSaveCurrentAsProfile();
-                    }
-                  } else if (e.key === 'Escape') {
-                    setShowProfileForm(false);
-                    setProfileName('');
-                    setEditingProfileId(null);
-                  }
-                }}
-              />
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
-                  type="button"
-                  onClick={editingProfileId ? handleUpdateProfile : handleSaveCurrentAsProfile}
-                  disabled={!profileName.trim()}
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: '12px',
-                    background: 'var(--accent-color)',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: 'white',
-                    cursor: profileName.trim() ? 'pointer' : 'not-allowed',
-                    opacity: profileName.trim() ? 1 : 0.6,
-                    flex: 1
-                  }}
-                  aria-label={editingProfileId ? "Update profile" : "Save profile"}
-                >
-                  {editingProfileId ? 'Update' : 'Save'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowProfileForm(false);
-                    setProfileName('');
-                    setEditingProfileId(null);
-                  }}
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: '12px',
-                    background: 'var(--bg-secondary)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '4px',
-                    color: 'var(--text-primary)',
-                    cursor: 'pointer'
-                  }}
-                  aria-label="Cancel"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-          <div className="form-help">
-            Save and quickly switch between endpoint configurations
-          </div>
-          
-          {/* Prompt Sets Management */}
-          {selectedProfileId && (
-            <div style={{ 
-              marginTop: '20px', 
-              padding: '15px', 
-              background: 'var(--bg-secondary)', 
-              borderRadius: '6px',
-              border: '1px solid var(--border-color)'
-            }}>
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center',
-                marginBottom: '12px'
-              }}>
-                <label className="form-label" style={{ margin: 0 }}>
-                  Prompt Sets
+            {/* AIM Catalog Selector */}
+            {selectedModel === 'AMD Inference Microservice (AIM)' && (
+              <div className="form-group" style={{ marginBottom: '0' }}>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span>AIM Model</span>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 'normal' }}>
+                    (Select a model from the AMD Inference Microservice catalog)
+                  </span>
                 </label>
-                {!showPromptSetForm && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowPromptSetForm(true);
-                      setEditingPromptSetId(null);
-                      setPromptSetName('');
-                      setPromptSetDescription('');
-                      setPromptSetPrompts(['']);
-                    }}
-                    style={{
-                      padding: '4px 8px',
-                      fontSize: '11px',
-                      background: 'var(--accent-color)',
-                      border: 'none',
-                      borderRadius: '4px',
-                      color: 'white',
-                      cursor: 'pointer'
-                    }}
-                    aria-label="Create new prompt set"
-                  >
-                    + New Prompt Set
-                  </button>
-                )}
-              </div>
-              
-              {(() => {
-                const profile = getProfile(selectedProfileId);
-                const promptSets = profile?.promptSets || [];
-                
-                if (promptSets.length === 0 && !showPromptSetForm) {
-                  return (
-                    <div className="form-help" style={{ marginBottom: '8px' }}>
-                      No prompt sets. Create one to run multiple prompts sequentially.
-                    </div>
-                  );
-                }
-                
-                return (
-                  <>
-                    {promptSets.length > 0 && !showPromptSetForm && (
-                      <div style={{ marginBottom: '12px' }}>
-                        {promptSets.map(promptSet => (
-                          <div 
-                            key={promptSet.id}
-                            style={{
-                              padding: '10px',
-                              marginBottom: '8px',
-                              background: 'var(--bg-primary)',
-                              border: '1px solid var(--border-color)',
-                              borderRadius: '4px',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'flex-start'
-                            }}
-                          >
-                            <div style={{ flex: 1 }}>
-                              <div style={{ fontWeight: 600, marginBottom: '4px' }}>
-                                {promptSet.name}
-                              </div>
-                              {promptSet.description && (
-                                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                                  {promptSet.description}
-                                </div>
-                              )}
-                              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                {promptSet.prompts.length} prompt{promptSet.prompts.length !== 1 ? 's' : ''}
-                              </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: '4px' }}>
-                              <button
-                                type="button"
-                                onClick={() => handleEditPromptSet(promptSet.id)}
-                                style={{
-                                  padding: '4px 8px',
-                                  fontSize: '11px',
-                                  background: 'var(--bg-secondary)',
-                                  border: '1px solid var(--border-color)',
-                                  borderRadius: '4px',
-                                  color: 'var(--text-primary)',
-                                  cursor: 'pointer'
-                                }}
-                                aria-label={`Edit prompt set ${promptSet.name}`}
-                              >
-                                ✏️
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeletePromptSet(promptSet.id)}
-                                style={{
-                                  padding: '4px 8px',
-                                  fontSize: '11px',
-                                  background: 'var(--bg-secondary)',
-                                  border: '1px solid var(--border-color)',
-                                  borderRadius: '4px',
-                                  color: 'var(--error-color)',
-                                  cursor: 'pointer'
-                                }}
-                                aria-label={`Delete prompt set ${promptSet.name}`}
-                              >
-                                🗑️
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                <select
+                  className="form-select"
+                  value={selectedAimModelId || ''}
+                  onChange={(e) => {
+                    const modelId = e.target.value;
+                    setSelectedAimModelId(modelId || null);
+                    if (modelId) {
+                      const model = AIM_CATALOG_MODELS.find(m => m.id === modelId);
+                      if (model) {
+                        showToast(`Selected ${model.name}`, 'success');
+                      }
+                    }
+                  }}
+                  aria-label="Select AIM model from catalog"
+                >
+                  <option value="">-- Select an AIM model --</option>
+                  {AIM_CATALOG_MODELS.map(model => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} ({model.organization}) {model.status === 'preview' ? '[Preview]' : ''} - {model.parameters}
+                    </option>
+                  ))}
+                </select>
+                {selectedAimModelId && (() => {
+                  const selectedModel = AIM_CATALOG_MODELS.find(m => m.id === selectedAimModelId);
+                  return selectedModel ? (
+                    <div className="form-help" style={{ marginTop: '8px', padding: '8px', background: 'var(--bg-secondary)', borderRadius: '4px' }}>
+                      <div style={{ fontSize: '0.85rem', marginBottom: '4px' }}>
+                        <strong>Model ID:</strong> {selectedModel.modelId}
                       </div>
-                    )}
-                    
-                    {showPromptSetForm && (
-                      <div style={{
-                        padding: '12px',
-                        background: 'var(--bg-primary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '4px'
-                      }}>
-                        <input
-                          type="text"
-                          value={promptSetName}
-                          onChange={(e) => setPromptSetName(e.target.value)}
-                          placeholder="Prompt set name"
-                          className="form-input"
-                          style={{ marginBottom: '8px' }}
-                          aria-label="Prompt set name"
-                        />
-                        <input
-                          type="text"
-                          value={promptSetDescription}
-                          onChange={(e) => setPromptSetDescription(e.target.value)}
-                          placeholder="Description (optional)"
-                          className="form-input"
-                          style={{ marginBottom: '12px' }}
-                          aria-label="Prompt set description"
-                        />
-                        
-                        <label style={{ fontSize: '0.9rem', fontWeight: 500, marginBottom: '8px', display: 'block' }}>
-                          Prompts:
-                        </label>
-                        {promptSetPrompts.map((prompt, index) => (
-                          <div key={index} style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
-                            <textarea
-                              value={prompt}
-                              onChange={(e) => handlePromptChange(index, e.target.value)}
-                              placeholder={`Prompt ${index + 1}`}
-                              className="form-input"
-                              style={{ 
-                                flex: 1, 
-                                minHeight: '60px',
-                                resize: 'vertical',
-                                fontFamily: 'inherit'
-                              }}
-                              aria-label={`Prompt ${index + 1}`}
-                            />
-                            {promptSetPrompts.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemovePromptField(index)}
-                                style={{
-                                  padding: '4px 8px',
-                                  fontSize: '12px',
-                                  background: 'var(--error-color)',
-                                  border: 'none',
-                                  borderRadius: '4px',
-                                  color: 'white',
-                                  cursor: 'pointer',
-                                  alignSelf: 'flex-start'
-                                }}
-                                aria-label={`Remove prompt ${index + 1}`}
-                              >
-                                ×
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                        
-                        <button
-                          type="button"
-                          onClick={handleAddPromptField}
-                          style={{
-                            padding: '6px 12px',
-                            fontSize: '12px',
-                            background: 'var(--bg-secondary)',
-                            border: '1px solid var(--border-color)',
-                            borderRadius: '4px',
-                            color: 'var(--text-primary)',
-                            cursor: 'pointer',
-                            marginBottom: '12px',
-                            width: '100%'
-                          }}
-                          aria-label="Add another prompt"
-                        >
-                          + Add Prompt
-                        </button>
-                        
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button
-                            type="button"
-                            onClick={editingPromptSetId ? handleUpdatePromptSet : handleCreatePromptSet}
-                            disabled={!promptSetName.trim() || promptSetPrompts.filter(p => p.trim()).length === 0}
-                            style={{
-                              padding: '6px 12px',
-                              fontSize: '12px',
-                              background: 'var(--accent-color)',
-                              border: 'none',
-                              borderRadius: '4px',
-                              color: 'white',
-                              cursor: promptSetName.trim() && promptSetPrompts.filter(p => p.trim()).length > 0 ? 'pointer' : 'not-allowed',
-                              opacity: promptSetName.trim() && promptSetPrompts.filter(p => p.trim()).length > 0 ? 1 : 0.6,
-                              flex: 1
-                            }}
-                            aria-label={editingPromptSetId ? "Update prompt set" : "Create prompt set"}
-                          >
-                            {editingPromptSetId ? 'Update' : 'Create'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowPromptSetForm(false);
-                              setEditingPromptSetId(null);
-                              setPromptSetName('');
-                              setPromptSetDescription('');
-                              setPromptSetPrompts(['']);
-                            }}
-                            style={{
-                              padding: '6px 12px',
-                              fontSize: '12px',
-                              background: 'var(--bg-secondary)',
-                              border: '1px solid var(--border-color)',
-                              borderRadius: '4px',
-                              color: 'var(--text-primary)',
-                              cursor: 'pointer'
-                            }}
-                            aria-label="Cancel"
-                          >
-                            Cancel
-                          </button>
+                      {selectedModel.description && (
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                          {selectedModel.description}
                         </div>
+                      )}
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        <strong>Version:</strong> {selectedModel.version} • <strong>Status:</strong> {selectedModel.status}
                       </div>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-          )}
-        </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                        <a 
+                          href="https://enterprise-ai.docs.amd.com/en/latest/aims/catalog/models.html" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          style={{ color: 'var(--accent-color)' }}
+                        >
+                          View full catalog →
+                        </a>
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+            )}
 
-        <div className="form-group">
-          <label className="form-label">
-            Endpoint URL
-          </label>
+            <div className="form-group" style={{ marginBottom: '0' }}>
+              <label className="form-label" style={{ marginBottom: '6px' }}>
+                Endpoint URL
+              </label>
           <input
             className="form-input"
             type="text"
@@ -827,18 +479,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             placeholder={
               selectedModel === 'Ollama (Local)' ? 'http://localhost:11434' :
               selectedModel === 'LM Studio (Local)' ? 'http://localhost:1234' :
+              selectedModel === 'AMD Inference Microservice (AIM)' ? 'https://aim.<cluster-domain>/v1' :
               'http://localhost:1234'
             }
           />
-          <div className="form-help">
-            {selectedModel === 'LM Studio (Local)' && 'Default: http://localhost:1234 (or your LM Studio URL/IP)'}
-            {selectedModel === 'Ollama (Local)' && 'Default: http://localhost:11434 (or your Ollama URL/IP)'}
-            {selectedModel === 'Custom Endpoint' && 'Enter your custom endpoint URL'}
-          </div>
-          
-          {/* Endpoint Health Status */}
-          {customEndpoint && (
-            <div style={{ marginTop: '10px' }}>
+              <div className="form-help" style={{ marginTop: '4px', marginBottom: '6px', fontSize: '0.8rem' }}>
+                {selectedModel === 'LM Studio (Local)' && 'Default: http://localhost:1234 (or your LM Studio URL/IP)'}
+                {selectedModel === 'Ollama (Local)' && 'Default: http://localhost:11434 (or your Ollama URL/IP)'}
+                {selectedModel === 'AMD Inference Microservice (AIM)' && (
+                  <>
+                    Your AIM ingress or gateway URL (e.g., https://aim.your-cluster.com/v1). 
+                    Replace &lt;cluster-domain&gt; with your actual cluster domain.
+                    <br />
+                    <a 
+                      href="https://rocm.blogs.amd.com/artificial-intelligence/enterprise-ai-aims/README.html" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      style={{ color: 'var(--accent-color)', marginLeft: '5px' }}
+                    >
+                      View AIM deployment guide →
+                    </a>
+                  </>
+                )}
+                {selectedModel === 'Custom Endpoint' && 'Enter your custom endpoint URL'}
+              </div>
+              
+              {/* Endpoint Health Status */}
+              {customEndpoint && (
+                <div style={{ marginTop: '6px' }}>
               <div style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
@@ -944,15 +612,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }}>
                   {endpointHealth.error}
                 </div>
+                )}
+              </div>
               )}
             </div>
-          )}
-        </div>
 
-        <div className="form-group">
-          <label className="form-label">
-            API Key (Optional)
-          </label>
+            <div className="form-group" style={{ marginBottom: '0' }}>
+              <label className="form-label" style={{ marginBottom: '6px' }}>
+                API Key (Optional)
+              </label>
           <input
             className="form-input"
             type="password"
@@ -963,68 +631,518 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           />
         </div>
 
-        <div className="form-group">
-          <label className="form-label">
-            Temperature: {temperature}
-          </label>
-          <input
-            className="form-range"
-            type="range"
-            min="0"
-            max="2"
-            step="0.1"
-            value={temperature}
-            onChange={(e) => setTemperature(parseFloat(e.target.value))}
-            aria-label={`Temperature: ${temperature}`}
-            aria-valuemin={0}
-            aria-valuemax={2}
-            aria-valuenow={temperature}
-          />
-        </div>
+            {/* Compact Model Parameters */}
+            <div className="form-group" style={{ marginBottom: '0' }}>
+              <label className="form-label" style={{ marginBottom: '8px' }}>
+                Model Parameters
+              </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <label style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                  Temperature: <strong>{temperature}</strong>
+                </label>
+              </div>
+              <input
+                className="form-range"
+                type="range"
+                min="0"
+                max="2"
+                step="0.1"
+                value={temperature}
+                onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                aria-label={`Temperature: ${temperature}`}
+                aria-valuemin={0}
+                aria-valuemax={2}
+                aria-valuenow={temperature}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <label style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                  Max Tokens: <strong>{maxTokens}</strong>
+                </label>
+              </div>
+              <input
+                className="form-range"
+                type="range"
+                min="100"
+                max="4096"
+                step="100"
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(parseInt(e.target.value))}
+                aria-label={`Max tokens: ${maxTokens}`}
+                aria-valuemin={100}
+                aria-valuemax={4096}
+                aria-valuenow={maxTokens}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <label style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                  Top P: <strong>{topP}</strong>
+                </label>
+              </div>
+              <input
+                className="form-range"
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={topP}
+                onChange={(e) => setTopP(parseFloat(e.target.value))}
+                aria-label={`Top P: ${topP}`}
+                aria-valuemin={0}
+                aria-valuemax={1}
+                aria-valuenow={topP}
+                style={{ width: '100%' }}
+              />
+              </div>
+            </div>
+          </div>
+          </div>
 
-        <div className="form-group">
-          <label className="form-label">
-            Max Tokens: {maxTokens}
-          </label>
-          <input
-            className="form-range"
-            type="range"
-            min="100"
-            max="4096"
-            step="100"
-            value={maxTokens}
-            onChange={(e) => setMaxTokens(parseInt(e.target.value))}
-            aria-label={`Max tokens: ${maxTokens}`}
-            aria-valuemin={100}
-            aria-valuemax={4096}
-            aria-valuenow={maxTokens}
-          />
-        </div>
+          {/* Right Column: Profiles, Display Settings, and Management */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Endpoint Profiles */}
+            <div className="form-group">
+              <label className="form-label">
+                Endpoint Profiles
+              </label>
+              <div style={{ marginBottom: '10px' }}>
+                {profiles.length > 0 ? (
+                  <select
+                    className="form-select"
+                    value={selectedProfileId || ''}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        handleSelectProfile(e.target.value);
+                      } else {
+                        setSelectedProfileId(null);
+                      }
+                    }}
+                    aria-label="Select endpoint profile"
+                    style={{ marginBottom: '8px' }}
+                  >
+                    <option value="">-- No profile selected --</option>
+                    {profiles.map(profile => (
+                      <option key={profile.id} value={profile.id}>
+                        {profile.name} ({profile.endpoint})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="form-help" style={{ marginBottom: '8px' }}>
+                    No profiles saved yet. Save current settings as a profile below.
+                  </div>
+                )}
+                
+                {profiles.length > 0 && selectedProfileId && (
+                  <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleEditProfile(selectedProfileId)}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        color: 'var(--text-primary)',
+                        cursor: 'pointer'
+                      }}
+                      aria-label="Edit selected profile"
+                    >
+                      ✏️ Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteProfile(selectedProfileId)}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        color: 'var(--error-color)',
+                        cursor: 'pointer'
+                      }}
+                      aria-label="Delete selected profile"
+                    >
+                      🗑️ Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+              
+              {!showProfileForm ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowProfileForm(true);
+                    setEditingProfileId(null);
+                    setProfileName('');
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    color: 'var(--text-primary)',
+                    cursor: 'pointer',
+                    width: '100%'
+                  }}
+                  aria-label="Save current settings as profile"
+                >
+                  💾 Save Current Settings as Profile
+                </button>
+              ) : (
+                <div style={{ 
+                  padding: '10px',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px'
+                }}>
+                  <input
+                    type="text"
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    placeholder="Profile name"
+                    className="form-input"
+                    style={{ marginBottom: '8px' }}
+                    aria-label="Profile name"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        if (editingProfileId) {
+                          handleUpdateProfile();
+                        } else {
+                          handleSaveCurrentAsProfile();
+                        }
+                      } else if (e.key === 'Escape') {
+                        setShowProfileForm(false);
+                        setProfileName('');
+                        setEditingProfileId(null);
+                      }
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={editingProfileId ? handleUpdateProfile : handleSaveCurrentAsProfile}
+                      disabled={!profileName.trim()}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '12px',
+                        background: 'var(--accent-color)',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: 'white',
+                        cursor: profileName.trim() ? 'pointer' : 'not-allowed',
+                        opacity: profileName.trim() ? 1 : 0.6,
+                        flex: 1
+                      }}
+                      aria-label={editingProfileId ? "Update profile" : "Save profile"}
+                    >
+                      {editingProfileId ? 'Update' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowProfileForm(false);
+                        setProfileName('');
+                        setEditingProfileId(null);
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '12px',
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        color: 'var(--text-primary)',
+                        cursor: 'pointer'
+                      }}
+                      aria-label="Cancel"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="form-help">
+                Save and quickly switch between endpoint configurations
+              </div>
+              
+              {/* Prompt Sets Management */}
+              {selectedProfileId && (
+                <div style={{ 
+                  marginTop: '20px', 
+                  padding: '15px', 
+                  background: 'var(--bg-secondary)', 
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color)'
+                }}>
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center',
+                    marginBottom: '12px'
+                  }}>
+                    <label className="form-label" style={{ margin: 0 }}>
+                      Prompt Sets
+                    </label>
+                    {!showPromptSetForm && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPromptSetForm(true);
+                          setEditingPromptSetId(null);
+                          setPromptSetName('');
+                          setPromptSetDescription('');
+                          setPromptSetPrompts(['']);
+                        }}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          background: 'var(--accent-color)',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: 'white',
+                          cursor: 'pointer'
+                        }}
+                        aria-label="Create new prompt set"
+                      >
+                        + New Prompt Set
+                      </button>
+                    )}
+                  </div>
+                  
+                  {(() => {
+                    const profile = getProfile(selectedProfileId);
+                    const promptSets = profile?.promptSets || [];
+                    
+                    if (promptSets.length === 0 && !showPromptSetForm) {
+                      return (
+                        <div className="form-help" style={{ marginBottom: '8px' }}>
+                          No prompt sets. Create one to run multiple prompts sequentially.
+                        </div>
+                      );
+                    }
+                    
+                    return (
+                      <>
+                        {promptSets.length > 0 && !showPromptSetForm && (
+                          <div style={{ marginBottom: '12px' }}>
+                            {promptSets.map(promptSet => (
+                              <div 
+                                key={promptSet.id}
+                                style={{
+                                  padding: '10px',
+                                  marginBottom: '8px',
+                                  background: 'var(--bg-primary)',
+                                  border: '1px solid var(--border-color)',
+                                  borderRadius: '4px',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'flex-start'
+                                }}
+                              >
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontWeight: 600, marginBottom: '4px' }}>
+                                    {promptSet.name}
+                                  </div>
+                                  {promptSet.description && (
+                                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                                      {promptSet.description}
+                                    </div>
+                                  )}
+                                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                    {promptSet.prompts.length} prompt{promptSet.prompts.length !== 1 ? 's' : ''}
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEditPromptSet(promptSet.id)}
+                                    style={{
+                                      padding: '4px 8px',
+                                      fontSize: '11px',
+                                      background: 'var(--bg-secondary)',
+                                      border: '1px solid var(--border-color)',
+                                      borderRadius: '4px',
+                                      color: 'var(--text-primary)',
+                                      cursor: 'pointer'
+                                    }}
+                                    aria-label={`Edit prompt set ${promptSet.name}`}
+                                  >
+                                    ✏️
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeletePromptSet(promptSet.id)}
+                                    style={{
+                                      padding: '4px 8px',
+                                      fontSize: '11px',
+                                      background: 'var(--bg-secondary)',
+                                      border: '1px solid var(--border-color)',
+                                      borderRadius: '4px',
+                                      color: 'var(--error-color)',
+                                      cursor: 'pointer'
+                                    }}
+                                    aria-label={`Delete prompt set ${promptSet.name}`}
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {showPromptSetForm && (
+                          <div style={{
+                            padding: '12px',
+                            background: 'var(--bg-primary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '4px'
+                          }}>
+                            <input
+                              type="text"
+                              value={promptSetName}
+                              onChange={(e) => setPromptSetName(e.target.value)}
+                              placeholder="Prompt set name"
+                              className="form-input"
+                              style={{ marginBottom: '8px' }}
+                              aria-label="Prompt set name"
+                            />
+                            <input
+                              type="text"
+                              value={promptSetDescription}
+                              onChange={(e) => setPromptSetDescription(e.target.value)}
+                              placeholder="Description (optional)"
+                              className="form-input"
+                              style={{ marginBottom: '12px' }}
+                              aria-label="Prompt set description"
+                            />
+                            
+                            <label style={{ fontSize: '0.9rem', fontWeight: 500, marginBottom: '8px', display: 'block' }}>
+                              Prompts:
+                            </label>
+                            {promptSetPrompts.map((prompt, index) => (
+                              <div key={index} style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+                                <textarea
+                                  value={prompt}
+                                  onChange={(e) => handlePromptChange(index, e.target.value)}
+                                  placeholder={`Prompt ${index + 1}`}
+                                  className="form-input"
+                                  style={{ 
+                                    flex: 1, 
+                                    minHeight: '60px',
+                                    resize: 'vertical',
+                                    fontFamily: 'inherit'
+                                  }}
+                                  aria-label={`Prompt ${index + 1}`}
+                                />
+                                {promptSetPrompts.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemovePromptField(index)}
+                                    style={{
+                                      padding: '4px 8px',
+                                      fontSize: '12px',
+                                      background: 'var(--error-color)',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      color: 'white',
+                                      cursor: 'pointer',
+                                      alignSelf: 'flex-start'
+                                    }}
+                                    aria-label={`Remove prompt ${index + 1}`}
+                                  >
+                                    ×
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            
+                            <button
+                              type="button"
+                              onClick={handleAddPromptField}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                background: 'var(--bg-secondary)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '4px',
+                                color: 'var(--text-primary)',
+                                cursor: 'pointer',
+                                marginBottom: '12px',
+                                width: '100%'
+                              }}
+                              aria-label="Add another prompt"
+                            >
+                              + Add Prompt
+                            </button>
+                            
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button
+                                type="button"
+                                onClick={editingPromptSetId ? handleUpdatePromptSet : handleCreatePromptSet}
+                                disabled={!promptSetName.trim() || promptSetPrompts.filter(p => p.trim()).length === 0}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '12px',
+                                  background: 'var(--accent-color)',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  color: 'white',
+                                  cursor: promptSetName.trim() && promptSetPrompts.filter(p => p.trim()).length > 0 ? 'pointer' : 'not-allowed',
+                                  opacity: promptSetName.trim() && promptSetPrompts.filter(p => p.trim()).length > 0 ? 1 : 0.6,
+                                  flex: 1
+                                }}
+                                aria-label={editingPromptSetId ? "Update prompt set" : "Create prompt set"}
+                              >
+                                {editingPromptSetId ? 'Update' : 'Create'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowPromptSetForm(false);
+                                  setEditingPromptSetId(null);
+                                  setPromptSetName('');
+                                  setPromptSetDescription('');
+                                  setPromptSetPrompts(['']);
+                                }}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '12px',
+                                  background: 'var(--bg-secondary)',
+                                  border: '1px solid var(--border-color)',
+                                  borderRadius: '4px',
+                                  color: 'var(--text-primary)',
+                                  cursor: 'pointer'
+                                }}
+                                aria-label="Cancel"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
 
-        <div className="form-group">
-          <label className="form-label">
-            Top P: {topP}
-          </label>
-          <input
-            className="form-range"
-            type="range"
-            min="0"
-            max="1"
-            step="0.1"
-            value={topP}
-            onChange={(e) => setTopP(parseFloat(e.target.value))}
-            aria-label={`Top P: ${topP}`}
-            aria-valuemin={0}
-            aria-valuemax={1}
-            aria-valuenow={topP}
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">
-            Layout Settings
-          </label>
-          <div style={{ 
+            <div className="form-group">
+              <label className="form-label">
+                Layout Settings
+              </label>
+              <div style={{ 
             display: 'flex', 
             alignItems: 'center', 
             gap: '10px',
@@ -1152,6 +1270,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
           <div className="form-help" style={{ marginTop: '8px', color: 'var(--text-secondary)', fontSize: '12px' }}>
             This will remove all sessions, conversations, and settings. The page will reload after clearing.
+          </div>
+        </div>
           </div>
         </div>
       </div>

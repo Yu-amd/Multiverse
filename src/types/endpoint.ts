@@ -2,6 +2,8 @@
  * Endpoint health and capability types
  */
 
+export type ProviderType = 'lmstudio' | 'ollama' | 'custom' | 'aim';
+
 export type EndpointHealthStatus = 'healthy' | 'degraded' | 'offline' | 'unknown';
 
 export interface EndpointCapabilities {
@@ -24,6 +26,7 @@ export interface EndpointHealth {
 export interface EndpointProfile {
   id: string;
   name: string;
+  provider?: ProviderType;  // Optional for backward compatibility
   endpoint: string;
   apiKey?: string;
   model?: string;
@@ -31,6 +34,7 @@ export interface EndpointProfile {
   maxTokens?: number;
   topP?: number;
   health?: EndpointHealth;
+  aimConfig?: import('./aim').AimConfig;  // AIM-specific configuration
   createdAt: number;
   updatedAt: number;
 }
