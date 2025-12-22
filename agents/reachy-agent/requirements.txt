@@ -9,7 +9,10 @@ pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
 # Reachy Mini SDK (optional - only needed for real hardware)
-# reachy_mini>=1.2.0  # Uncomment when ready to use real hardware
+# Install with: pip install reachy_mini>=1.2.0
+# Note: Commented out by default to allow mocked mode without SDK
+# Uncomment the line below if you want to use real hardware:
+# reachy_mini>=1.2.0
 # Text-to-speech (optional - for audio responses)
 edge-tts>=6.1.0  # Preferred: better quality, free, no API key
 # gtts>=2.5.0  # Alternative: requires internet connection
