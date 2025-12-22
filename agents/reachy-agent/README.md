@@ -208,10 +208,11 @@ python test_robot_audio.py       # Test audio playback
 
 ### Additional Documentation
 
-- `TROUBLESHOOTING.md` - Detailed troubleshooting guide
-- `HARDWARE_SETUP.md` - Hardware setup guide
-- `AUDIO_TROUBLESHOOTING.md` - Audio-specific issues
-- `CONNECTION_RETRY.md` - Connection retry logic
+See the [`docs/`](docs/) directory for detailed guides:
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) - Detailed troubleshooting guide
+- [`docs/HARDWARE_SETUP.md`](docs/HARDWARE_SETUP.md) - Hardware setup guide
+- [`docs/AUDIO_TROUBLESHOOTING.md`](docs/AUDIO_TROUBLESHOOTING.md) - Audio-specific issues
+- [`docs/CONNECTION_RETRY.md`](docs/CONNECTION_RETRY.md) - Connection retry logic
 
 ## Architecture
 

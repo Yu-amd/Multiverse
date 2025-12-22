@@ -142,7 +142,7 @@ except Exception as e:
     
     print()
     print("For more help, see:")
-    print("  - TROUBLESHOOTING.md")
+    print("  - docs/TROUBLESHOOTING.md")
     print("  - https://github.com/pollen-robotics/reachy_mini")
     
     sys.exit(1)
