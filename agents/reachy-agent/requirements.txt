@@ -1,0 +1,17 @@
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+prometheus-client>=0.19.0
+sse-starlette>=1.8.0
+httpx>=0.25.0
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+# Reachy Mini SDK (optional - only needed for real hardware)
+# reachy_mini>=1.2.0  # Uncomment when ready to use real hardware
+# Text-to-speech (optional - for audio responses)
+edge-tts>=6.1.0  # Preferred: better quality, free, no API key
+# gtts>=2.5.0  # Alternative: requires internet connection
+pydub>=0.25.1  # For MP3 to WAV conversion (Reachy Mini prefers WAV)
+

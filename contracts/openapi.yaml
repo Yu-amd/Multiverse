@@ -1,0 +1,390 @@
+openapi: 3.0.3
+info:
+  title: Agent API
+  description: Standardized HTTP/SSE API for robotics agents
+  version: 0.1.0
+  contact:
+    name: Fleet System
+    email: support@example.com
+
+servers:
+  - url: http://localhost:9001
+    description: Local development server
+  - url: https://agent.example.com
+    description: Production server
+
+paths:
+  /v1/agent/info:
+    get:
+      summary: Get agent identity and capabilities
+      description: Returns agent information including robot ID, type, capabilities, and version
+      operationId: getAgentInfo
+      tags:
+        - Agent
+      responses:
+        '200':
+          description: Agent information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentInfo'
+              example:
+                robot_id: "reachy-001"
+                robot_type: "reachy"
+                capabilities: ["devops_copilot", "gestures"]
+                version: "0.1.0"
+                backend_default: "aim"
+
+  /v1/agent/health:
+    get:
+      summary: Get agent health status
+      description: Returns current health status including sensors, actuators, and backend availability
+      operationId: getAgentHealth
+      tags:
+        - Agent
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: "online"
+                last_seen: "2024-01-15T10:30:00Z"
+                sensors_ok: true
+                actuators_ok: true
+                backend_available: true
+                uptime_seconds: 3600.0
+
+  /v1/tasks:
+    post:
+      summary: Submit a new task
+      description: Creates and submits a new task for execution
+      operationId: createTask
+      tags:
+        - Tasks
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskRequest'
+            example:
+              task_type: "reachy_devops_copilot"
+              input:
+                prompt: "Summarize the last production deployment"
+              routing:
+                backend: "aim"
+                base_url: "https://aim.example.com/v1"
+                api_key: "sk-..."
+              policy:
+                e2e_slo_ms: 2500
+                timeout_ms: 2200
+              trace:
+                session_id: "session-001"
+                request_id: "req-001"
+      responses:
+        '201':
+          description: Task created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /v1/tasks/{task_id}:
+    get:
+      summary: Get task status
+      description: Returns the current status of a task
+      operationId: getTaskStatus
+      tags:
+        - Tasks
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task identifier
+      responses:
+        '200':
+          description: Task status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/metrics:
+    get:
+      summary: Get Prometheus metrics
+      description: Returns Prometheus-formatted metrics
+      operationId: getMetrics
+      tags:
+        - Observability
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/events:
+    get:
+      summary: Stream Server-Sent Events
+      description: Streams real-time events via Server-Sent Events (SSE)
+      operationId: streamEvents
+      tags:
+        - Events
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+
+  schemas:
+    BackendType:
+      type: string
+      enum: [local, aim]
+      description: Backend inference provider type
+
+    TaskState:
+      type: string
+      enum: [pending, acknowledged, running, completed, failed, cancelled]
+      description: Task execution state
+
+    AgentStatus:
+      type: string
+      enum: [online, degraded, offline]
+      description: Agent health status
+
+    RoutingConfig:
+      type: object
+      required:
+        - backend
+        - base_url
+      properties:
+        backend:
+          $ref: '#/components/schemas/BackendType'
+        base_url:
+          type: string
+          format: uri
+          description: Base URL for the backend API
+        api_key:
+          type: string
+          description: API key for authentication
+
+    PolicyConfig:
+      type: object
+      properties:
+        e2e_slo_ms:
+          type: integer
+          minimum: 0
+          default: 2500
+          description: End-to-end SLO in milliseconds
+        timeout_ms:
+          type: integer
+          minimum: 0
+          default: 2200
+          description: Task timeout in milliseconds
+
+    TraceConfig:
+      type: object
+      properties:
+        session_id:
+          type: string
+          description: Session identifier
+        request_id:
+          type: string
+          description: Request identifier
+
+    TaskRequest:
+      type: object
+      required:
+        - task_type
+        - input
+      properties:
+        task_type:
+          type: string
+          description: Type of task to execute
+          example: "reachy_devops_copilot"
+        input:
+          type: object
+          description: Task input parameters
+          additionalProperties: true
+        routing:
+          $ref: '#/components/schemas/RoutingConfig'
+        policy:
+          $ref: '#/components/schemas/PolicyConfig'
+        trace:
+          $ref: '#/components/schemas/TraceConfig'
+
+    TaskStatus:
+      type: object
+      required:
+        - task_id
+        - state
+        - progress
+        - created_at
+        - updated_at
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          description: Unique task identifier
+        state:
+          $ref: '#/components/schemas/TaskState'
+        progress:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: Task progress (0.0 to 1.0)
+        latency_ms:
+          type: integer
+          description: Task latency in milliseconds
+        aim_latency_ms:
+          type: integer
+          description: AIM backend latency in milliseconds
+        e2e_ms:
+          type: integer
+          description: End-to-end latency in milliseconds
+        e2e_slo_ms:
+          type: integer
+          description: End-to-end SLO in milliseconds
+        slo_pass:
+          type: boolean
+          description: Whether SLO was met
+        result:
+          type: object
+          description: Task result
+          additionalProperties: true
+        error:
+          type: string
+          description: Error message if task failed
+        created_at:
+          type: string
+          format: date-time
+          description: Task creation timestamp
+        updated_at:
+          type: string
+          format: date-time
+          description: Last update timestamp
+
+    AgentInfo:
+      type: object
+      required:
+        - robot_id
+        - robot_type
+        - capabilities
+        - version
+      properties:
+        robot_id:
+          type: string
+          description: Unique robot identifier
+        robot_type:
+          type: string
+          description: Type of robot
+          example: "reachy"
+        capabilities:
+          type: array
+          items:
+            type: string
+          description: List of supported capabilities
+        version:
+          type: string
+          description: Agent version
+        backend_default:
+          $ref: '#/components/schemas/BackendType'
+
+    HealthStatus:
+      type: object
+      required:
+        - status
+        - last_seen
+        - sensors_ok
+        - actuators_ok
+      properties:
+        status:
+          $ref: '#/components/schemas/AgentStatus'
+        last_seen:
+          type: string
+          format: date-time
+          description: Last health check timestamp
+        sensors_ok:
+          type: boolean
+          description: Whether sensors are operational
+        actuators_ok:
+          type: boolean
+          description: Whether actuators are operational
+        backend_available:
+          type: boolean
+          description: Whether backend is available
+        uptime_seconds:
+          type: number
+          description: Agent uptime in seconds
+
+  responses:
+    Unauthorized:
+      description: Unauthorized - Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                type: string
+                example: "Missing API key. Provide X-API-Key header."
+
+    BadRequest:
+      description: Bad Request - Invalid request data
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                type: string
+                example: "Invalid task request"
+
+    NotFound:
+      description: Not Found - Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                type: string
+                example: "Task not found"
+
