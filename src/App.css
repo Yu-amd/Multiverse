@@ -56,17 +56,20 @@ body {
   max-height: calc(100vh - 40px);
   overflow: hidden;
   padding: 20px;
+  min-width: 0; /* Critical: Prevent content from forcing wider columns */
+  width: 100%; /* Fill available width */
+  box-sizing: border-box;
 }
 
 /* Desktop Layout */
 .content-wrapper.desktop-layout {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr; /* Equal 50/50 split */
   grid-template-rows: 1fr;
 }
 
 /* Tablet Layout */
 .content-wrapper.tablet-layout {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr; /* Equal 50/50 split */
   grid-template-rows: 1fr;
   gap: 1rem;
   height: calc(100vh - 20px);
@@ -75,7 +78,7 @@ body {
 
 /* ROG Ally X Layout */
 .content-wrapper.rog-ally-layout {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr; /* Equal 50/50 split */
   grid-template-rows: 1fr;
   gap: 30px;
   height: calc(100vh - 40px);
@@ -93,29 +96,24 @@ body {
 
 /* Chat Container */
 .chat-container {
-  background: var(--chat-bg, var(--bg-secondary));
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 20px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  max-height: 100%;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
-  order: 1;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
-  transition: box-shadow 0.3s ease, border-color 0.3s ease;
-}
-
-.chat-container:hover {
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.12);
+  box-sizing: border-box;
 }
 
 /* ROG Ally X Chat Container */
 .rog-ally-layout .chat-container {
   order: 1;
   min-height: 0;
-  padding: 30px;
+  padding: 0;
 }
 
 .mobile-layout .chat-container {
@@ -126,11 +124,11 @@ body {
 /* Chat Messages Area */
 .chat-messages {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   margin-bottom: 20px;
   font-size: 1rem;
-  min-height: 0;
-  max-height: calc(100% - 120px);
   scroll-behavior: smooth;
 }
 
@@ -316,12 +314,19 @@ body {
 .chat-input-area {
   margin-top: auto;
   flex-shrink: 0;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .chat-input-container {
   display: flex;
   gap: 10px;
   flex-direction: row;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .mobile-layout .chat-input-container {
@@ -331,6 +336,7 @@ body {
 
 .chat-input {
   flex: 1;
+  min-width: 0;
   min-height: 44px;
   padding: 10px;
   border: 1px solid var(--input-border);
@@ -341,6 +347,8 @@ body {
   resize: none;
   font-size: 1rem;
   transition: border-color 0.2s;
+  box-sizing: border-box;
+  max-width: 100%;
 }
 
 .chat-input:focus {
@@ -422,10 +430,9 @@ body {
   padding: 20px;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
-  order: 2;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
 }
 
@@ -450,6 +457,7 @@ body {
   margin-bottom: 20px;
   flex-wrap: nowrap;
   gap: 0;
+  flex-shrink: 0; /* Prevent header from shrinking */
 }
 
 .mobile-layout .code-header {
@@ -496,6 +504,7 @@ body {
   border-bottom: 1px solid var(--code-preview-border);
   flex-wrap: nowrap;
   overflow-x: auto;
+  flex-shrink: 0; /* Prevent tabs from shrinking */
 }
 
 .language-tab {
@@ -534,13 +543,14 @@ body {
 
 .code-preview {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
   background: var(--code-preview-bg);
   border: 1px solid var(--code-preview-border);
   border-radius: 6px;
   padding: 15px;
-  overflow: auto;
-  min-height: 0;
-  max-height: calc(100% - 130px);
+  box-sizing: border-box;
 }
 
 /* ROG Ally X Code Preview */
@@ -583,11 +593,20 @@ body {
   font-size: 0.875rem;
   line-height: 1.6;
   color: var(--code-syntax-text);
+  width: 100%;
+  max-width: 100%; /* Prevent horizontal overflow */
+  min-width: 0; /* Allow shrinking */
+  height: 100%;
+  overflow: visible; /* Allow content to overflow so parent can scroll */
+  box-sizing: border-box; /* Include padding in width calculation */
 }
 
 .code-line {
   display: flex;
   min-height: 1.6em;
+  min-width: 0; /* Allow shrinking */
+  max-width: 100%; /* Prevent overflow */
+  width: 100%; /* Take full width of parent */
 }
 
 .line-number {
@@ -603,6 +622,10 @@ body {
   flex: 1;
   white-space: pre-wrap;
   word-wrap: break-word;
+  overflow-wrap: break-word; /* Break long words */
+  max-width: 100%; /* Prevent overflow */
+  min-width: 0; /* Allow shrinking */
+  box-sizing: border-box;
 }
 
 /* Syntax Highlighting Colors - Theme aware */
@@ -805,7 +828,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 10000; /* Higher than navigation */
 }
 
 .modal-content {
@@ -943,7 +966,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 10000; /* Higher than navigation */
 }
 
 .dashboard-content {
@@ -952,10 +975,16 @@ body {
   border-radius: 8px;
   padding: 20px;
   max-width: 90%;
-  width: 90%;
-  max-height: 85vh;
-  overflow: auto;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.dashboard-content-page {
+  width: 100%;
+  min-height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .mobile-layout .dashboard-content {
@@ -1258,16 +1287,42 @@ body {
   align-items: flex-end;
 }
 
+/* Global ROG Ally Layout Class */
+html.rog-ally-layout,
+html.rog-ally-layout body,
+html.rog-ally-layout #root,
+html.rog-ally-layout .app-container,
+html.rog-ally-layout .app-router {
+  font-size: 1.2rem;
+}
+
+html.rog-ally-layout .content-wrapper {
+  font-size: 1.2rem;
+}
+
+html.rog-ally-layout .chat-container,
+html.rog-ally-layout .code-panel,
+html.rog-ally-layout .settings-page,
+html.rog-ally-layout .models-page,
+html.rog-ally-layout .fleet-page,
+html.rog-ally-layout .observability-page,
+html.rog-ally-layout .runs-page {
+  font-size: 1.2rem;
+}
+
 /* Theme Variables */
 :root[data-theme="dark"] {
-  --bg-primary: #0d1117;
-  --bg-secondary: #161b22;
-  --bg-tertiary: #21262d;
-  --text-primary: #c9d1d9;
-  --text-secondary: #8b949e;
-  --border-color: #30363d;
-  --accent-color: #58a6ff;
-  --accent-hover: #79c0ff;
+  /* Ops Console Design System - Neutral Dark */
+  --bg-primary: #0f0f0f;
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #252525;
+  --bg-hover: #2a2a2a;
+  --bg-active: #2a2a2a;
+  --text-primary: #ffffff;
+  --text-secondary: #a0a0a0;
+  --border-color: #2a2a2a;
+  --accent-color: #4a9eff;
+  --accent-hover: #3a8eef;
   --success-color: #238636;
   --error-color: #da3633;
   --warning-color: #d29922;
@@ -1314,6 +1369,8 @@ body {
   --bg-primary: #fafbfc;
   --bg-secondary: #ffffff;
   --bg-tertiary: #f6f8fa;
+  --bg-hover: #eaeef2;
+  --bg-active: #dbeafe;
   --text-primary: #0d1117;
   --text-secondary: #424a53;
   --border-color: #d1d9e0;

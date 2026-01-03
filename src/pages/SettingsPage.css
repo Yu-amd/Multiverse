@@ -1,0 +1,122 @@
+.settings-page {
+  flex: 1;
+  padding: 2rem;
+  background: var(--bg-primary, #0d1117);
+  color: var(--text-primary, #c9d1d9);
+  overflow-y: auto;
+  height: 100%;
+}
+
+.settings-header {
+  margin-bottom: 2rem;
+}
+
+.settings-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-primary, #c9d1d9);
+}
+
+.settings-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-secondary, #8b949e);
+  margin: 0;
+}
+
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  max-width: 800px;
+}
+
+.settings-section {
+  background: var(--bg-secondary, #161b22);
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.section-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #8b949e);
+  margin: 0 0 1rem 0;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--text-primary, #c9d1d9);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.form-select {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--bg-tertiary, #0d1117);
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 6px;
+  color: var(--text-primary, #c9d1d9);
+  font-size: 0.875rem;
+  font-family: inherit;
+}
+
+.form-select:focus {
+  outline: none;
+  border-color: var(--accent-color, #58a6ff);
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1);
+}
+
+.form-help {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #8b949e);
+  margin-top: 0.5rem;
+}
+
+.danger-button {
+  padding: 10px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--error-color, #f85149);
+  background: transparent;
+  color: var(--error-color, #f85149);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  width: 100%;
+  transition: all 0.2s;
+}
+
+.danger-button:hover {
+  background: rgba(248, 81, 73, 0.1);
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .settings-page {
+    padding: 1rem;
+  }
+
+  .settings-content {
+    gap: 1.5rem;
+  }
+
+  .settings-section {
+    padding: 1rem;
+  }
+}
+

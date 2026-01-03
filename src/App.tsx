@@ -1569,18 +1569,6 @@ function App() {
             <SettingsModal
               showSettings={showSettings}
               onClose={() => setShowSettings(false)}
-              selectedModel={selectedModel}
-              setSelectedModel={(model) => updateSettings({ selectedModel: model })}
-              customEndpoint={customEndpoint}
-              setCustomEndpoint={(endpoint) => updateSettings({ customEndpoint: endpoint })}
-              apiKey={apiKey}
-              setApiKey={(key) => updateSettings({ apiKey: key })}
-              temperature={temperature}
-              setTemperature={(temp) => updateSettings({ temperature: temp })}
-              maxTokens={maxTokens}
-              setMaxTokens={(tokens) => updateSettings({ maxTokens: tokens })}
-              topP={topP}
-              setTopP={(p) => updateSettings({ topP: p })}
               showTimestamps={showTimestamps}
               setShowTimestamps={setShowTimestamps}
               theme={theme}
@@ -1588,6 +1576,7 @@ function App() {
               isMobile={isMobile}
               isTablet={isTablet}
               isROGAllyX={isROGAllyX}
+              showToast={showToast}
             />
           </ErrorBoundary>
 

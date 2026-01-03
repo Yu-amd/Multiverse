@@ -19,8 +19,10 @@
     "screenshots": "node scripts/capture-screenshots.js"
   },
   "dependencies": {
+    "@types/react-router-dom": "^5.3.3",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-router-dom": "^7.11.0",
     "zod": "^4.1.13"
   },
   "devDependencies": {
@@ -36,6 +38,7 @@
     "@vitejs/plugin-react": "^5.1.0",
     "@vitest/coverage-v8": "^4.0.8",
     "@vitest/ui": "^4.0.8",
+    "baseline-browser-mapping": "^2.9.11",
     "eslint": "^9.36.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.22",

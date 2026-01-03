@@ -1,0 +1,150 @@
+.observability-page {
+  flex: 1;
+  padding: 2rem;
+  background: var(--bg-primary, #0d1117);
+  color: var(--text-primary, #c9d1d9);
+  overflow-y: auto;
+  height: 100%;
+}
+
+.observability-header {
+  margin-bottom: 2rem;
+}
+
+.observability-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-primary, #c9d1d9);
+}
+
+.observability-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-secondary, #8b949e);
+  margin: 0;
+}
+
+.observability-content {
+  width: 100%;
+}
+
+/* Dashboard content when rendered as page */
+.observability-content .dashboard-content-page {
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  color: var(--text-primary, #c9d1d9);
+  display: flex;
+  flex-direction: column;
+}
+
+.observability-content .dashboard-header {
+  display: none; /* Hide the dashboard header since we have our own */
+}
+
+.observability-content .dashboard-title {
+  display: none; /* Hide the dashboard title since we have our own */
+}
+
+.observability-content .dashboard-tabs {
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border-color, #30363d);
+  padding-bottom: 0;
+  gap: 0;
+}
+
+.observability-content .dashboard-tab {
+  background: transparent;
+  color: var(--text-secondary, #8b949e);
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: all 0.2s;
+  margin-bottom: -1px;
+}
+
+.observability-content .dashboard-tab:hover {
+  color: var(--text-primary, #c9d1d9);
+  background: transparent;
+}
+
+.observability-content .dashboard-tab.active {
+  color: var(--accent-color, #58a6ff);
+  border-bottom-color: var(--accent-color, #58a6ff);
+  background: transparent;
+}
+
+.observability-content .dashboard-panel {
+  background: var(--bg-secondary, #161b22);
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 8px;
+  padding: 1.5rem;
+  min-height: 400px;
+  max-height: none;
+  overflow: visible;
+}
+
+.observability-content .metric-card {
+  background: var(--bg-tertiary, #0d1117);
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.observability-content .metric-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #8b949e);
+  margin: 0 0 0.75rem 0;
+}
+
+.observability-content .metric-value {
+  font-size: 0.875rem;
+  color: var(--text-primary, #c9d1d9);
+  line-height: 1.6;
+}
+
+.observability-content .metric-value .value {
+  color: var(--success-color, #3fb950);
+  font-weight: 600;
+}
+
+.observability-content .metric-value .error {
+  color: var(--error-color, #f85149);
+  font-weight: 600;
+}
+
+.observability-content .metric-value .warning {
+  color: var(--warning-color, #d29922);
+  font-weight: 600;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .observability-page {
+    padding: 1rem;
+  }
+
+  .observability-content .dashboard-tabs {
+    flex-wrap: wrap;
+  }
+
+  .observability-content .dashboard-tab {
+    padding: 0.5rem 1rem;
+    font-size: 0.75rem;
+  }
+
+  .observability-content .dashboard-panel {
+    padding: 1rem;
+  }
+}

@@ -125,7 +125,7 @@ except Exception as e:
 # Now safe to import FastAPI and other dependencies
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from fastapi import Depends, HTTPException, status, BackgroundTasks
+from fastapi import Depends, HTTPException, status, BackgroundTasks, Body
 
 # CRITICAL: Add current directory back to sys.path AFTER loading common framework
 # This ensures uvicorn can import our local app.main module when it does "app.main:app"
@@ -138,6 +138,16 @@ app = common_main.app
 tasks = common_main.tasks
 emit_event = common_main.emit_event
 verify_api_key = common_main.verify_api_key
+
+# Add CORS middleware to allow frontend to access the API
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5175", "http://localhost:5173", "http://localhost:3000"],  # Common dev ports
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # App object successfully loaded from common framework
 
@@ -208,11 +218,34 @@ from .reachy_driver import ReachyDriver
 # Logger is already initialized above for route patching
 
 # Initialize Reachy driver
-# Check environment variable to enable real hardware
-# Set REACHY_MOCKED=false to use real hardware
-reachy_mocked = os.getenv("REACHY_MOCKED", "true").lower() not in ("false", "0", "no", "off")
+# Check config file first, then environment variable
+from app.config_manager import is_hardware_enabled, is_audio_enabled
+
+# Priority: config file > environment variable > default
+config_hardware_enabled = is_hardware_enabled()
+env_mocked = os.getenv("REACHY_MOCKED", "").lower()
+if env_mocked and env_mocked not in ("false", "0", "no", "off"):
+    # Environment variable explicitly set, use it
+    reachy_mocked = True
+elif config_hardware_enabled:
+    # Config says hardware enabled
+    reachy_mocked = False
+else:
+    # Default: hardware disabled for safety
+    reachy_mocked = True
+
 reachy_driver = ReachyDriver(mocked=reachy_mocked)
 gesture_controller = GestureController(driver=reachy_driver if not reachy_driver.mocked else None)
+
+# Log initial state
+if not reachy_mocked:
+    logger.info(
+        "Hardware mode enabled - connection will be attempted on first gesture/audio call",
+        mocked=reachy_mocked,
+        driver_connected=reachy_driver.is_connected()
+    )
+else:
+    logger.info("Running in mocked mode", mocked=reachy_mocked)
 
 # Initialize audio controller
 from app.audio import AudioController
@@ -374,6 +407,40 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                 task_id=task_id,
                 data={},
             ))
+            
+            # Ensure driver is connected before performing gesture
+            if not reachy_driver.mocked and not reachy_driver.is_connected():
+                logger.info("Attempting to connect to robot before ACK gesture...")
+                try:
+                    # Wait a bit for daemon/Zenoh to be ready if needed
+                    from app.daemon_manager import is_daemon_running, wait_for_zenoh_ready
+                    import asyncio
+                    if is_daemon_running():
+                        # Daemon is running, ensure Zenoh is ready (run in executor since it's blocking)
+                        loop = asyncio.get_event_loop()
+                        zenoh_ready = await loop.run_in_executor(None, wait_for_zenoh_ready, 5.0)
+                        if not zenoh_ready:
+                            logger.warning("Zenoh not ready, but attempting connection anyway")
+                    
+                    connected = await reachy_driver.connect(force=True)
+                    if connected and reachy_driver.is_connected():
+                        robot_instance = reachy_driver.get_robot()
+                        logger.info("Successfully connected to robot", driver_connected=reachy_driver.is_connected(), robot_available=robot_instance is not None, robot_type=type(robot_instance).__name__ if robot_instance else None)
+                        # Update audio controller with robot instance
+                        if robot_instance:
+                            audio_controller.robot = robot_instance
+                            audio_controller.is_mocked = False
+                            logger.info("Audio controller updated with robot instance", audio_mocked=audio_controller.is_mocked, has_media=hasattr(robot_instance, 'media'), has_play_sound=hasattr(robot_instance.media, 'play_sound') if hasattr(robot_instance, 'media') else False)
+                        else:
+                            logger.warning("Robot instance is None after connection")
+                    else:
+                        logger.warning("Failed to connect to robot, gesture may be skipped", driver_connected=reachy_driver.is_connected())
+                except Exception as e:
+                    logger.error("Exception during robot connection attempt", error=str(e), error_type=type(e).__name__)
+            
+            # Log gesture attempt state
+            robot_before_gesture = reachy_driver.get_robot() if reachy_driver.is_connected() else None
+            logger.info("About to perform ACK gesture", driver_mocked=reachy_driver.mocked, driver_connected=reachy_driver.is_connected(), gesture_controller_mocked=gesture_controller.is_mocked, robot_available=robot_before_gesture is not None, robot_type=type(robot_before_gesture).__name__ if robot_before_gesture else None)
             await gesture_controller.ack_gesture()
             
             # Check if this is a DevOps copilot task
@@ -449,11 +516,17 @@ async def execute_task(task_id: str, task_request: TaskRequest):
             ))
             
             # Perform done gesture
+            logger.info("About to perform done gesture", driver_connected=reachy_driver.is_connected())
             await gesture_controller.done_gesture()
             
             # Play audio response through robot's speaker (if enabled)
-            # Check if audio is enabled via environment variable
-            audio_enabled = os.getenv("REACHY_AUDIO_ENABLED", "true").lower() not in ("false", "0", "no", "off")
+            # Check config file first, then environment variable
+            config_audio_enabled = is_audio_enabled()
+            env_audio_enabled = os.getenv("REACHY_AUDIO_ENABLED", "").lower()
+            if env_audio_enabled and env_audio_enabled in ("false", "0", "no", "off"):
+                audio_enabled = False
+            else:
+                audio_enabled = config_audio_enabled
             
             # Log audio configuration for debugging
             logger.info(
@@ -577,6 +650,175 @@ async def execute_task(task_id: str, task_request: TaskRequest):
             except Exception as emit_error:
                 logger.error("Failed to emit task_failed event", error=str(emit_error))
 
+
+# Management API endpoints
+from app.config_manager import get_config, set_hardware_enabled, set_audio_enabled, is_hardware_enabled, is_audio_enabled
+import subprocess
+import signal
+
+@app.get("/v1/agent/config")
+async def get_agent_config():
+    """Get current agent configuration."""
+    config = get_config()
+    config_hardware_enabled = config.get("hardware_enabled", False)
+    config_audio_enabled = config.get("audio_enabled", True)
+    
+    # Check what the actual state is
+    env_mocked = os.getenv("REACHY_MOCKED", "").lower()
+    env_audio = os.getenv("REACHY_AUDIO_ENABLED", "").lower()
+    
+    return {
+        "config_file": {
+            "hardware_enabled": config_hardware_enabled,
+            "audio_enabled": config_audio_enabled
+        },
+        "environment": {
+            "REACHY_MOCKED": env_mocked if env_mocked else "not set",
+            "REACHY_AUDIO_ENABLED": env_audio if env_audio else "not set"
+        },
+        "runtime": {
+            "current_mocked": reachy_driver.mocked,
+            "driver_connected": reachy_driver.is_connected(),
+            "hardware_enabled": not reachy_driver.mocked,
+            "audio_enabled": is_audio_enabled()
+        }
+    }
+
+@app.post("/v1/agent/config/hardware")
+async def set_hardware_config(enabled: bool = Body(..., embed=False)):
+    """Set hardware enabled state. Accepts raw boolean in JSON body."""
+    try:
+        set_hardware_enabled(enabled)
+        return {
+            "success": True,
+            "hardware_enabled": enabled,
+            "message": f"Hardware {'enabled' if enabled else 'disabled'}. Call /v1/agent/reload to apply changes."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/v1/agent/config/audio")
+async def set_audio_config(enabled: bool = Body(..., embed=False)):
+    """Set audio enabled state. Accepts raw boolean in JSON body."""
+    try:
+        set_audio_enabled(enabled)
+        return {
+            "success": True,
+            "audio_enabled": enabled,
+            "message": f"Audio {'enabled' if enabled else 'disabled'}. Restart agent to apply changes."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/v1/agent/reload")
+async def reload_config():
+    """Reload configuration and update driver without full restart."""
+    global reachy_driver, gesture_controller, audio_controller
+    
+    try:
+        # Import daemon manager
+        from app.daemon_manager import ensure_daemon_running, stop_daemon, wait_for_zenoh_ready
+        
+        # Reload config
+        config_hardware_enabled = is_hardware_enabled()
+        config_audio_enabled = is_audio_enabled()
+        env_mocked = os.getenv("REACHY_MOCKED", "").lower()
+        env_audio_enabled = os.getenv("REACHY_AUDIO_ENABLED", "").lower()
+        
+        # Determine hardware state (config file takes precedence over env var)
+        if env_mocked and env_mocked not in ("false", "0", "no", "off"):
+            new_mocked = True
+        elif config_hardware_enabled:
+            new_mocked = False
+        else:
+            new_mocked = True
+        
+        # Determine audio state (config file takes precedence over env var)
+        if env_audio_enabled and env_audio_enabled in ("false", "0", "no", "off"):
+            new_audio_enabled = False
+        else:
+            new_audio_enabled = config_audio_enabled
+        
+        # Manage daemon based on hardware state
+        if not new_mocked:
+            # Hardware enabled - ensure daemon is running
+            logger.info("Hardware enabled - ensuring daemon is running...")
+            daemon_started = ensure_daemon_running()
+            if daemon_started:
+                logger.info("Daemon is running, waiting for Zenoh service to be ready...")
+                # Wait for Zenoh service to be ready (with timeout)
+                zenoh_ready = wait_for_zenoh_ready(timeout=10.0)
+                if not zenoh_ready:
+                    logger.warning("Zenoh service not ready - connection may fail")
+            else:
+                logger.warning("Failed to start daemon - hardware may not work")
+        else:
+            # Hardware disabled - can optionally stop daemon (but we'll leave it running for now)
+            # Users might want to use the daemon dashboard even if agent is in mocked mode
+            pass
+        
+        # Update driver if state changed
+        if reachy_driver.mocked != new_mocked:
+            # Disconnect old driver
+            if reachy_driver.is_connected():
+                await reachy_driver.disconnect()
+            
+            # Create new driver with updated state
+            reachy_driver = ReachyDriver(mocked=new_mocked)
+            gesture_controller = GestureController(driver=reachy_driver if not reachy_driver.mocked else None)
+            
+            # Update audio controller robot reference
+            if not new_mocked and reachy_driver.is_connected():
+                robot_instance = reachy_driver.get_robot()
+                if robot_instance:
+                    audio_controller.robot = robot_instance
+                    audio_controller.is_mocked = False
+            else:
+                audio_controller.robot = None
+                audio_controller.is_mocked = True
+            
+            # If hardware is now enabled, try to connect (but don't fail if it doesn't work yet)
+            if not new_mocked:
+                try:
+                    # Wait a bit more for everything to settle
+                    import asyncio
+                    await asyncio.sleep(1)
+                    
+                    connected = await reachy_driver.connect(force=True)
+                    if connected and reachy_driver.is_connected():
+                        robot_instance = reachy_driver.get_robot()
+                        logger.info("Hardware connected successfully after config reload", robot_available=robot_instance is not None, robot_type=type(robot_instance).__name__ if robot_instance else None, has_head=hasattr(robot_instance, 'head') if robot_instance else False, has_media=hasattr(robot_instance, 'media') if robot_instance else False)
+                        # Update audio controller with robot instance
+                        if robot_instance:
+                            audio_controller.robot = robot_instance
+                            audio_controller.is_mocked = False
+                            logger.info("Audio controller updated with robot instance", audio_mocked=audio_controller.is_mocked)
+                        else:
+                            logger.warning("Robot instance is None after successful connection")
+                    else:
+                        logger.info("Hardware enabled but connection not yet available - will retry on first use", driver_connected=reachy_driver.is_connected())
+                except Exception as e:
+                    logger.info("Connection attempt after config reload (will retry on first use)", error=str(e), error_type=type(e).__name__)
+            
+            logger.info(
+                "Configuration reloaded",
+                hardware_enabled=not new_mocked,
+                audio_enabled=new_audio_enabled,
+                mocked=new_mocked,
+                connected=reachy_driver.is_connected()
+            )
+        
+        return {
+            "success": True,
+            "hardware_enabled": not new_mocked,
+            "audio_enabled": new_audio_enabled,
+            "mocked": new_mocked,
+            "connected": reachy_driver.is_connected(),
+            "message": "Configuration reloaded successfully"
+        }
+    except Exception as e:
+        logger.error("Failed to reload config", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 # App is already imported from common framework
 # We override specific routes below

@@ -168,12 +168,152 @@ export const useChat = ({
       });
       logger.log('Request payload:', request);
 
+      // Check if this is the Reachy agent endpoint
+      const isReachyAgent = endpoint.includes('localhost:9001') || endpoint.includes('9001');
+      
       // Add timeout to prevent hanging requests
       const controller = new AbortController();
       abortControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-      const response = await fetch(`${endpoint}/v1/chat/completions`, {
+      let response: Response;
+      
+      if (isReachyAgent) {
+        // Route through Reachy agent /v1/tasks endpoint
+        // Extract the last user message as the prompt
+        const prompt = newMessage.content;
+        
+        // Get backend routing from settings (default to AIM)
+        // For now, we'll use a default AIM backend configuration
+        // TODO: Get this from settings/Models page configuration
+        const taskRequest = {
+          task_type: 'reachy_devops_copilot',
+          input: {
+            prompt: prompt,
+            model: 'Qwen/Qwen3-32B' // Default AIM model
+          },
+          routing: {
+            backend: 'aim' as const,
+            base_url: 'http://localhost:8000', // Default AIM URL - TODO: get from settings
+            api_key: apiKey || 'sk-your-api-key' // Use provided API key
+          }
+        };
+        
+        logger.log('Routing through Reachy agent /v1/tasks', { taskRequest });
+        
+        // Submit task
+        const taskResponse = await fetch(`${endpoint}/v1/tasks`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
+          },
+          body: JSON.stringify(taskRequest),
+          signal: controller.signal,
+        });
+        
+        if (!taskResponse.ok) {
+          const errorText = await taskResponse.text();
+          logger.error('Task creation error:', errorText);
+          throw new Error(`HTTP error! status: ${taskResponse.status} - ${errorText}`);
+        }
+        
+        const taskStatus = await taskResponse.json();
+        const taskId = taskStatus.task_id;
+        
+        logger.log('Task created, polling for completion', { taskId });
+        
+        // Poll for task completion
+        let pollAttempts = 0;
+        const maxPollAttempts = 120; // 2 minutes max (1 second intervals)
+        let finalTaskStatus: any = null;
+        
+        while (pollAttempts < maxPollAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+          
+          if (controller.signal.aborted) {
+            throw new Error('Request aborted');
+          }
+          
+          const statusResponse = await fetch(`${endpoint}/v1/tasks/${taskId}`, {
+            headers: {
+              ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
+            },
+            signal: controller.signal,
+          });
+          
+          if (!statusResponse.ok) {
+            throw new Error(`Failed to get task status: ${statusResponse.status}`);
+          }
+          
+          finalTaskStatus = await statusResponse.json();
+          
+          if (finalTaskStatus.state === 'completed') {
+            logger.log('Task completed', { taskId, result: finalTaskStatus.result });
+            break;
+          } else if (finalTaskStatus.state === 'failed') {
+            throw new Error(finalTaskStatus.error || 'Task failed');
+          }
+          
+          pollAttempts++;
+        }
+        
+        if (!finalTaskStatus || finalTaskStatus.state !== 'completed') {
+          throw new Error('Task did not complete within timeout');
+        }
+        
+        // Extract response content
+        const responseContent = finalTaskStatus.result?.content || '';
+        
+        if (!responseContent) {
+          throw new Error('No response content in task result');
+        }
+        
+        // Simulate streaming for better UX
+        const words = responseContent.split(' ');
+        let currentIndex = 0;
+        
+        const streamInterval = setInterval(() => {
+          if (currentIndex < words.length) {
+            const chunk = words.slice(0, currentIndex + 1).join(' ');
+            setResponseContent(chunk);
+            currentIndex++;
+          } else {
+            clearInterval(streamInterval);
+            setIsLoading(false);
+            setResponseContent('');
+            
+            // Add final response to messages
+            const assistantMessage: Message = {
+              id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+              role: 'assistant' as const,
+              content: responseContent,
+              timestamp: new Date(),
+              edited: false,
+            };
+            
+            setMessages(prev => [...prev, assistantMessage]);
+            
+            // Record metrics
+            const endTime = Date.now();
+            const totalTime = endTime - startTime;
+            recordMetrics(
+              currentInput.length,
+              responseContent.length,
+              totalTime,
+              totalTime, // First token latency (approximate)
+              responseContent.length / (totalTime / 1000)
+            );
+            
+            clearTimeout(timeoutId);
+          }
+        }, 20); // Fast streaming
+        
+        return; // Exit early, don't process as streaming response
+      }
+      
+      // Standard chat completions endpoint
+      response = await fetch(`${endpoint}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

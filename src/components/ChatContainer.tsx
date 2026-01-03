@@ -22,11 +22,11 @@ interface ChatContainerProps {
   isMobile: boolean;
   isROGAllyX: boolean;
   onClearChat: () => void;
-  onOpenSettings: () => void;
-  onOpenDashboard: () => void;
   onOpenHistory: () => void;
   handleDeleteMessage: (messageId: string) => void;
   onStopGenerationRef?: React.MutableRefObject<(() => void) | null>;
+  onToggleCodePreview?: () => void;
+  showCodePreview?: boolean;
 }
 
 export const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -45,11 +45,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
   isMobile,
   isROGAllyX,
   onClearChat,
-  onOpenSettings,
-  onOpenDashboard,
   onOpenHistory,
   handleDeleteMessage,
-  onStopGenerationRef
+  onStopGenerationRef,
+  onToggleCodePreview,
+  showCodePreview = false
 }) => {
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const virtualizedMessagesRef = useRef<VirtualizedMessagesRef>(null);
@@ -305,27 +305,26 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
   return (
     <div className="chat-container">
-      <div style={{ marginBottom: '20px' }}>
+      <div style={{ marginBottom: '20px', minWidth: 0, maxWidth: '100%', boxSizing: 'border-box' }}>
         <div style={{ 
           display: 'flex', 
           gap: isMobile ? '8px' : '10px', 
           marginBottom: isMobile ? '15px' : '20px',
-          flexWrap: isMobile ? 'wrap' : 'nowrap'
+          flexWrap: isMobile ? 'wrap' : 'nowrap',
+          minWidth: 0,
+          maxWidth: '100%',
+          boxSizing: 'border-box'
         }}>
-          <button 
-            className="control-button"
-            onClick={onOpenSettings}
-            aria-label="Open settings"
-          >
-            ⚙️ Settings
-          </button>
-          <button 
-            className="control-button"
-            onClick={onOpenDashboard}
-            aria-label="Open performance dashboard"
-          >
-            📊 Dashboard
-          </button>
+          {onToggleCodePreview && (
+            <button 
+              className="control-button code-preview-toggle-button"
+              onClick={onToggleCodePreview}
+              aria-label={showCodePreview ? 'Hide code preview' : 'Show code preview'}
+              title={showCodePreview ? 'Hide code preview' : 'Show code preview'}
+            >
+              {showCodePreview ? '📋 Hide Code' : '📋 Show Code'}
+            </button>
+          )}
           <button 
             className="control-button"
             onClick={onOpenHistory}
@@ -772,7 +771,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             display: 'flex',
             gap: '8px',
             alignItems: 'center',
-            flexWrap: 'wrap'
+            flexWrap: 'wrap',
+            minWidth: 0,
+            maxWidth: '100%',
+            boxSizing: 'border-box'
           }}>
             <label style={{
               fontSize: '0.85rem',
@@ -798,7 +800,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
               disabled={isLoading || isRunningPromptSet}
               style={{
                 flex: 1,
-                minWidth: '200px',
+                minWidth: 0,
+                maxWidth: '100%',
                 padding: '6px 10px',
                 borderRadius: '4px',
                 border: '1px solid var(--border-color)',
@@ -806,7 +809,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 color: 'var(--text-primary)',
                 fontSize: '0.9rem',
                 cursor: (isLoading || isRunningPromptSet) ? 'not-allowed' : 'pointer',
-                opacity: (isLoading || isRunningPromptSet) ? 0.6 : 1
+                opacity: (isLoading || isRunningPromptSet) ? 0.6 : 1,
+                boxSizing: 'border-box'
               }}
               aria-label="Select prompt set to run automatically"
               title="Selecting a prompt set will automatically run all prompts sequentially"
@@ -838,7 +842,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
           display: 'flex', 
           gap: '10px', 
           alignItems: 'flex-end',
-          flexDirection: 'row'
+          flexDirection: 'row',
+          minWidth: 0,
+          maxWidth: '100%',
+          boxSizing: 'border-box'
         }}>
           <textarea
             className="chat-input"

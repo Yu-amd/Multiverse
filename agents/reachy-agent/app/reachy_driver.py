@@ -76,9 +76,14 @@ class ReachyDriver:
         
         if self._connection_failed and not force:
             if time_since_last_attempt < self._connection_retry_cooldown:
-                # Still in cooldown period, don't retry
+                # Still in cooldown period, but log that we're skipping
+                logger.debug(
+                    "Skipping connection retry (cooldown)",
+                    seconds_remaining=self._connection_retry_cooldown - time_since_last_attempt
+                )
                 return False
             # Cooldown expired, reset failure flag and retry
+            logger.info("Connection cooldown expired, retrying...")
             self._connection_failed = False
         
         # Real implementation using reachy_mini SDK
@@ -91,9 +96,16 @@ class ReachyDriver:
             # For our use case, we'll create it and connect explicitly
             logger.info("Attempting to connect to Reachy Mini hardware...")
             self.robot = ReachyMini()
+            # Verify robot was created successfully
+            if self.robot is None:
+                raise RuntimeError("ReachyMini() returned None")
             self.connected = True
             self._connection_failed = False
-            logger.info("Reachy driver connected to hardware successfully")
+            logger.info("Reachy driver connected to hardware successfully", 
+                       robot_type=type(self.robot).__name__, 
+                       robot_has_head=hasattr(self.robot, 'head') if self.robot else False,
+                       robot_has_goto_target=hasattr(self.robot, 'goto_target') if self.robot else False,
+                       robot_has_media=hasattr(self.robot, 'media') if self.robot else False)
             return True
         except ImportError:
             logger.error(
@@ -106,6 +118,22 @@ class ReachyDriver:
         except Exception as e:
             error_str = str(e)
             error_type = type(e).__name__
+            
+            # Special handling for "Camera not found" - this is often non-fatal
+            # The robot may still be accessible for gestures/audio via Zenoh
+            if "Camera not found" in error_str or "camera" in error_str.lower():
+                logger.warning(
+                    "Camera not found during Reachy Mini connection",
+                    error=error_str,
+                    error_type=error_type,
+                    note="Camera is required for full SDK initialization, but gestures/audio may still work. Will attempt to use robot without camera."
+                )
+                # Don't mark as failed - we'll try to use the robot anyway
+                # The robot might still be accessible via Zenoh even if camera init failed
+                self.connected = False
+                self.robot = None
+                self._connection_failed = False  # Don't block retries for camera errors
+                return False
             
             # Provide helpful error messages based on error type
             if "zenoh" in error_str.lower() or "7447" in error_str or "ZError" in error_type:

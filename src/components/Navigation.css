@@ -1,0 +1,111 @@
+.navigation {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary, #1a1a1a);
+  border-right: 1px solid var(--border-color, #2a2a2a);
+  min-width: 200px;
+  max-width: 200px;
+  width: 200px;
+  flex-shrink: 0;
+  height: 100vh;
+  padding: 1rem 0;
+  z-index: 100; /* Lower than modals */
+  position: relative;
+  box-sizing: border-box;
+}
+
+.navigation-brand {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color, #2a2a2a);
+  margin-bottom: 1rem;
+}
+
+.navigation-logo {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary, #ffffff);
+  letter-spacing: 0.05em;
+}
+
+.navigation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+}
+
+.navigation-list li {
+  margin: 0;
+}
+
+.navigation-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1.5rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: all 0.2s ease;
+  border-left: 3px solid transparent;
+  background: transparent;
+}
+
+.navigation-link:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.navigation-link.active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+  border-left-color: var(--accent-color);
+  font-weight: 600;
+}
+
+.navigation-link:hover,
+.navigation-link.active {
+  /* Ensure smooth transitions */
+  transition: background-color 0.2s ease, color 0.2s ease, border-left-color 0.2s ease;
+}
+
+.navigation-icon {
+  font-size: 1.25rem;
+  width: 24px;
+  text-align: center;
+}
+
+.navigation-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Mobile/Tablet adjustments */
+@media (max-width: 768px) {
+  .navigation {
+    min-width: 60px;
+    max-width: 60px;
+    width: 60px;
+  }
+
+  .navigation-brand {
+    padding: 1rem 0.5rem;
+    text-align: center;
+  }
+
+  .navigation-logo {
+    font-size: 0.875rem;
+  }
+
+  .navigation-label {
+    display: none;
+  }
+
+  .navigation-link {
+    padding: 0.75rem;
+    justify-content: center;
+  }
+}
+
+

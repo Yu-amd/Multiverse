@@ -68,8 +68,8 @@ Set environment variables or create `.env` file:
 
 ```bash
 # Hardware
-REACHY_MOCKED=true              # Set to "false" for real hardware
-REACHY_AUDIO_ENABLED=true        # Enable text-to-speech
+REACHY_MOCKED=false             # Default: real hardware enabled (set to "true" to disable)
+REACHY_AUDIO_ENABLED=true        # Default: audio enabled (set to "false" to disable)
 REACHY_USE_ALSA_DIRECT=true     # Use ALSA directly (Linux)
 
 # AIM Backend
@@ -83,15 +83,36 @@ LOG_LEVEL=INFO
 
 ## Running
 
-### Mocked Mode (Default)
+### Starting the Agent
 
 ```bash
 ./start.sh
 ```
 
-The agent runs in mocked mode by default - gestures are logged but not executed.
+The agent **automatically enables hardware and audio by default**. No manual configuration needed!
 
-### Real Hardware
+**What happens automatically:**
+- ✅ Hardware mode enabled (`REACHY_MOCKED=false`)
+- ✅ Audio enabled (`REACHY_AUDIO_ENABLED=true`)
+- ✅ Gestures will execute if hardware is connected
+- ✅ Audio will play through robot speaker if hardware is connected
+- ✅ Gracefully falls back to mocked mode if hardware is not available
+
+**To disable hardware** (run in mocked mode):
+```bash
+export REACHY_MOCKED=true
+./start.sh
+```
+
+**To disable audio**:
+```bash
+export REACHY_AUDIO_ENABLED=false
+./start.sh
+```
+
+### Hardware Setup (First Time Only)
+
+If you have a Reachy Mini robot and want to use it:
 
 1. **Install SDK** (if not already installed):
    ```bash
@@ -109,17 +130,15 @@ The agent runs in mocked mode by default - gestures are logged but not executed.
    ./start_daemon_fixed.sh   # Start if not running
    ```
 
-4. **Enable hardware mode**:
+4. **Start the agent** (hardware enabled by default):
    ```bash
-   export REACHY_MOCKED=false
-   export REACHY_AUDIO_ENABLED=true
    ./start.sh
    ```
 
 5. **Verify connection**:
    ```bash
    curl http://localhost:9001/v1/agent/health
-   # Should show sensors_ok: true and actuators_ok: true
+   # Should show sensors_ok: true and actuators_ok: true if hardware connected
    ```
 
 ## Hardware Features

@@ -35,7 +35,7 @@ class GestureController:
         self.driver = driver
         self.is_mocked = driver is None or driver.mocked if driver else True
     
-    def _get_robot(self):
+    async def _get_robot(self):
         """
         Get the ReachyMini robot instance from driver.
         
@@ -43,31 +43,29 @@ class GestureController:
         Will attempt connection if not connected, but respects retry cooldown.
         """
         if self.is_mocked or not self.driver:
+            logger.debug("Gesture controller is mocked or driver is None", is_mocked=self.is_mocked, driver_available=self.driver is not None)
             return None
         
         # If already connected, return robot immediately
         if self.driver.is_connected():
-            return self.driver.get_robot()
+            robot = self.driver.get_robot()
+            logger.debug("Driver already connected, returning robot", robot_available=robot is not None)
+            return robot
         
         # Try to connect (respects cooldown period)
-        import asyncio
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If event loop is running, schedule connection attempt
-                # But don't wait - return None immediately
-                # Connection will happen in background for next gesture
-                asyncio.create_task(self.driver.connect())
-                return None
+            logger.debug("Driver not connected, attempting connection...", driver_mocked=self.driver.mocked)
+            connected = await self.driver.connect(force=True)  # Force connection attempt
+            if connected and self.driver.is_connected():
+                robot = self.driver.get_robot()
+                logger.info("Successfully got robot for gesture", robot_available=robot is not None, robot_type=type(robot).__name__ if robot else None)
+                return robot
             else:
-                # Event loop not running, can block
-                loop.run_until_complete(self.driver.connect())
-                if self.driver.is_connected():
-                    return self.driver.get_robot()
+                logger.warning("Connection attempt returned success but driver not connected", connected=connected, driver_connected=self.driver.is_connected())
                 return None
         except Exception as e:
             # Connection failed, but error already logged by driver
-            # Just return None silently
+            logger.error("Exception getting robot for gesture", error=str(e), error_type=type(e).__name__)
             return None
     
     async def ack_gesture(self) -> None:
@@ -83,27 +81,33 @@ class GestureController:
         
         # Real implementation using reachy_mini SDK
         try:
-            robot = self._get_robot()
+            logger.debug("Getting robot for ACK gesture", driver_available=self.driver is not None, driver_mocked=self.driver.mocked if self.driver else None)
+            robot = await self._get_robot()
             if not robot:
-                logger.warning("Robot not available for ACK gesture")
+                logger.warning("Robot not available for ACK gesture", driver_available=self.driver is not None, driver_connected=self.driver.is_connected() if self.driver else False)
                 return
             
+            logger.info("Robot obtained for ACK gesture", robot_type=type(robot).__name__, has_head=hasattr(robot, 'head'), has_goto_target=hasattr(robot, 'goto_target'))
             from reachy_mini.utils import create_head_pose
             
-            # Quick nod: look down slightly, then back up
+            # Quick nod: look down more noticeably, then back up
+            # Using larger movement (z=-15mm) and longer duration for visibility
+            logger.debug("Executing ACK gesture movement", z=-15)
             robot.goto_target(
-                head=create_head_pose(z=-5, roll=0, degrees=True, mm=True),
-                duration=0.2
+                head=create_head_pose(z=-15, roll=0, degrees=True, mm=True),
+                duration=0.4
             )
-            await asyncio.sleep(0.1)
+            logger.debug("ACK gesture movement command sent, waiting...")
+            await asyncio.sleep(0.5)  # Wait for movement to complete
             robot.goto_target(
                 head=create_head_pose(z=0, roll=0, degrees=True, mm=True),
-                duration=0.2
+                duration=0.4
             )
+            await asyncio.sleep(0.3)  # Wait for return movement
             
-            logger.info("Gesture: ACK", gesture="ack")
+            logger.info("Gesture: ACK completed", gesture="ack")
         except Exception as e:
-            logger.error("Failed to execute ACK gesture", error=str(e), error_type=type(e).__name__)
+            logger.error("Failed to execute ACK gesture", error=str(e), error_type=type(e).__name__, traceback=str(e.__traceback__) if hasattr(e, '__traceback__') else None)
     
     async def thinking_gesture(self) -> None:
         """
@@ -118,28 +122,29 @@ class GestureController:
         
         # Real implementation: slow head movement
         try:
-            robot = self._get_robot()
+            robot = await self._get_robot()
             if not robot:
                 logger.warning("Robot not available for THINKING gesture")
                 return
             
             from reachy_mini.utils import create_head_pose
             
-            # Slow side-to-side movement
+            # Slow side-to-side movement - make it more noticeable
             robot.goto_target(
-                head=create_head_pose(z=0, roll=10, degrees=True, mm=True),
-                duration=0.8
+                head=create_head_pose(z=0, roll=20, degrees=True, mm=True),
+                duration=1.0
             )
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.5)  # Wait for movement
             robot.goto_target(
-                head=create_head_pose(z=0, roll=-10, degrees=True, mm=True),
-                duration=0.8
+                head=create_head_pose(z=0, roll=-20, degrees=True, mm=True),
+                duration=1.0
             )
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.5)  # Wait for movement
             robot.goto_target(
                 head=create_head_pose(z=0, roll=0, degrees=True, mm=True),
-                duration=0.5
+                duration=0.6
             )
+            await asyncio.sleep(0.4)  # Wait for return
             
             logger.info("Gesture: THINKING", gesture="thinking")
         except Exception as e:
@@ -158,23 +163,24 @@ class GestureController:
         
         # Real implementation: nod head up
         try:
-            robot = self._get_robot()
+            robot = await self._get_robot()
             if not robot:
                 logger.warning("Robot not available for DONE gesture")
                 return
             
             from reachy_mini.utils import create_head_pose
             
-            # Nod up (positive z)
+            # Nod up (positive z) - make it more noticeable
             robot.goto_target(
-                head=create_head_pose(z=10, roll=0, degrees=True, mm=True),
-                duration=0.4
+                head=create_head_pose(z=20, roll=0, degrees=True, mm=True),
+                duration=0.5
             )
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.4)  # Wait for movement
             robot.goto_target(
                 head=create_head_pose(z=0, roll=0, degrees=True, mm=True),
-                duration=0.4
+                duration=0.5
             )
+            await asyncio.sleep(0.4)  # Wait for return
             
             logger.info("Gesture: DONE", gesture="done")
         except Exception as e:
@@ -193,7 +199,7 @@ class GestureController:
         
         # Real implementation: shake head
         try:
-            robot = self._get_robot()
+            robot = await self._get_robot()
             if not robot:
                 logger.warning("Robot not available for ERROR gesture")
                 return
@@ -232,7 +238,7 @@ class GestureController:
             return
         
         try:
-            robot = self._get_robot()
+            robot = await self._get_robot()
             if not robot:
                 logger.warning("Robot not available for REST gesture")
                 return

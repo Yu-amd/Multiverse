@@ -1,32 +1,26 @@
 import React from 'react';
-import { clearAllSessionData } from '../utils/sessionPersistence';
+import { useTheme } from '../hooks/useTheme';
+import { useLayout } from '../hooks/useLayout';
 import { useMetricsSampling, type SamplingInterval } from '../hooks/useMetricsSampling';
+import { clearAllSessionData } from '../utils/sessionPersistence';
+import { useToast } from '../hooks/useToast';
+import './SettingsPage.css';
 
-interface SettingsModalProps {
-  showSettings: boolean;
-  onClose: () => void;
-  showTimestamps: boolean;
-  setShowTimestamps: (show: boolean) => void;
-  theme: 'light' | 'dark';
-  setTheme: (theme: 'light' | 'dark') => void;
-  isMobile: boolean;
-  isTablet: boolean;
-  isROGAllyX: boolean;
-  showToast?: (message: string, type: 'success' | 'error' | 'info') => void;
-}
+export const SettingsPage: React.FC = () => {
+  const { theme, setTheme } = useTheme();
+  const { showToast } = useToast();
+  const { forceROGAlly, setForceROGAlly, isMobile, isTablet, isROGAllyX } = useLayout();
+  
+  const [showTimestamps, setShowTimestamps] = React.useState(() => {
+    const saved = localStorage.getItem('multiverse-show-timestamps');
+    return saved ? saved === 'true' : false;
+  });
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({
-  showSettings,
-  onClose,
-  showTimestamps,
-  setShowTimestamps,
-  theme,
-  setTheme,
-  isMobile,
-  isTablet,
-  isROGAllyX,
-  showToast = () => {}
-}) => {
+  // Save showTimestamps to localStorage when it changes
+  React.useEffect(() => {
+    localStorage.setItem('multiverse-show-timestamps', showTimestamps.toString());
+  }, [showTimestamps]);
+
   // Metrics sampling
   const savedInterval = localStorage.getItem('multiverse-metrics-interval');
   const defaultInterval = savedInterval ? parseFloat(savedInterval) as SamplingInterval : 1;
@@ -38,49 +32,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   });
 
-  if (!showSettings) return null;
+  const handleClearAllData = () => {
+    if (confirm('Are you sure you want to clear all data from this device? This will remove:\n- Current session\n- Session history\n- All saved conversations\n- Settings\n\nThis cannot be undone.')) {
+      clearAllSessionData();
+      localStorage.removeItem('multiverse-conversations');
+      localStorage.removeItem('multiverse-settings');
+      localStorage.removeItem('multiverse-current-conversation');
+      showToast('All data cleared. Please refresh the page.', 'info');
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+    }
+  };
+
+  const handleThemeChange = (newTheme: 'light' | 'dark') => {
+    setTheme(newTheme);
+    // useTheme hook already handles localStorage and document attribute
+    // Theme should apply immediately via useEffect in useTheme
+  };
+  
+  const handleROGAllyToggle = (checked: boolean) => {
+    setForceROGAlly(checked);
+    // useLayout hook handles localStorage and immediate layout update
+    showToast('Layout setting applied', 'success');
+  };
 
   return (
-    <div 
-      className="modal-overlay"
-      onClick={onClose}
-    >
-      <div 
-        className="modal-content"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-title"
-        style={{
-          padding: isMobile ? '15px' : '20px',
-          maxWidth: isMobile ? '95%' : '600px',
-          width: '90%',
-          maxHeight: isMobile ? '90vh' : '80vh'
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          marginBottom: '20px'
-        }}>
-          <h2 id="settings-title" className="modal-title">UI Settings</h2>
-          <button 
-            className="modal-close"
-            onClick={onClose}
-            aria-label="Close settings"
-          >
-            ✕ Close
-          </button>
-        </div>
+    <div className="settings-page">
+      <div className="settings-header">
+        <h1 className="settings-title">SETTINGS</h1>
+        <p className="settings-subtitle">UI preferences and system configuration</p>
+      </div>
 
-        {/* Single column layout for UI settings only */}
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '20px'
-        }}>
-          {/* Layout Settings */}
+      <div className="settings-content">
+        {/* Display Settings */}
+        <section className="settings-section">
+          <h2 className="section-title">DISPLAY SETTINGS</h2>
+          
           <div className="form-group">
             <label className="form-label">
               Layout Settings
@@ -94,11 +82,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <input
                 type="checkbox"
                 id="rog-ally-toggle"
-                checked={localStorage.getItem('force-rog-ally') === 'true'}
-                onChange={(e) => {
-                  localStorage.setItem('force-rog-ally', e.target.checked.toString());
-                  window.location.reload();
-                }}
+                checked={forceROGAlly}
+                onChange={(e) => handleROGAllyToggle(e.target.checked)}
                 aria-label="Force ROG Ally X layout with bigger fonts"
                 style={{ transform: 'scale(1.2)' }}
               />
@@ -111,7 +96,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Show Timestamps */}
           <div className="form-group">
             <label style={{ display: 'flex', alignItems: 'center', color: 'var(--text-primary)', cursor: 'pointer' }}>
               <input
@@ -129,7 +113,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Theme Selection */}
           <div className="form-group">
             <label className="form-label">
               Theme
@@ -137,12 +120,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <select
               className="form-select"
               value={theme}
-              onChange={(e) => {
-                const newTheme = e.target.value as 'light' | 'dark';
-                setTheme(newTheme);
-                localStorage.setItem('multiverse-theme', newTheme);
-                document.documentElement.setAttribute('data-theme', newTheme);
-              }}
+              onChange={(e) => handleThemeChange(e.target.value as 'light' | 'dark')}
               aria-label="Theme selection"
             >
               <option value="dark">🌙 Dark Mode</option>
@@ -152,8 +130,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               Choose your preferred color theme
             </div>
           </div>
+        </section>
 
-          {/* Metrics Sampling */}
+        {/* System Settings */}
+        <section className="settings-section">
+          <h2 className="section-title">SYSTEM SETTINGS</h2>
+          
           <div className="form-group">
             <label className="form-label">
               Metrics Sampling Interval
@@ -179,37 +161,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {!isBackground && !isBatterySaver && ` (Active - ${currentInterval}s)`}
             </div>
           </div>
+        </section>
 
-          {/* Data Management */}
+        {/* Data Management */}
+        <section className="settings-section">
+          <h2 className="section-title">DATA MANAGEMENT</h2>
+          
           <div className="form-group">
             <label className="form-label">
-              Data Management
+              Clear All Data
             </label>
             <button
               type="button"
-              onClick={() => {
-                if (confirm('Are you sure you want to clear all data from this device? This will remove:\n- Current session\n- Session history\n- All saved conversations\n- Settings\n\nThis cannot be undone.')) {
-                  clearAllSessionData();
-                  localStorage.removeItem('multiverse-conversations');
-                  localStorage.removeItem('multiverse-settings');
-                  localStorage.removeItem('multiverse-current-conversation');
-                  showToast('All data cleared. Please refresh the page.', 'info');
-                  setTimeout(() => {
-                    window.location.reload();
-                  }, 2000);
-                }
-              }}
-              style={{
-                padding: '10px 16px',
-                borderRadius: '6px',
-                border: '1px solid var(--error-color)',
-                background: 'transparent',
-                color: 'var(--error-color)',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: 500,
-                width: '100%'
-              }}
+              onClick={handleClearAllData}
+              className="danger-button"
               aria-label="Clear all data from this device"
             >
               🗑️ Clear All Data from This Device
@@ -218,8 +183,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               This will remove all sessions, conversations, and settings. The page will reload after clearing.
             </div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );
 };
+
