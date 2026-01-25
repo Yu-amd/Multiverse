@@ -168,13 +168,15 @@ export const useChat = ({
       });
       logger.log('Request payload:', request);
 
-      // Check if this is the Reachy agent endpoint
-      const isReachyAgent = endpoint.includes('localhost:9001') || endpoint.includes('9001');
+      // Always route through Reachy agent for task execution
+      // The Reachy agent will then route to the appropriate backend (LM Studio, AIM, etc.)
+      const isReachyAgent = true; // Always use Reachy agent for task routing
+      const reachyAgentUrl = 'http://localhost:9001'; // Reachy agent endpoint (fixed)
       
-      // Add timeout to prevent hanging requests
+      // Add timeout to prevent hanging requests (increased to 120 seconds for backend inference)
       const controller = new AbortController();
       abortControllerRef.current = controller;
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 seconds for backend inference
 
       let response: Response;
       
@@ -183,26 +185,95 @@ export const useChat = ({
         // Extract the last user message as the prompt
         const prompt = newMessage.content;
         
-        // Get backend routing from settings (default to AIM)
-        // For now, we'll use a default AIM backend configuration
-        // TODO: Get this from settings/Models page configuration
+        // Get backend routing from settings
+        // Determine backend type from selected model
+        let backendType: 'local' | 'aim' = 'local';
+        let backendUrl = customEndpoint || 'http://localhost:1234';
+        let backendModel = 'default';
+        
+        // Get settings from localStorage to determine backend
+        try {
+          const settingsStr = localStorage.getItem('multiverse-settings');
+          if (settingsStr) {
+            const settings = JSON.parse(settingsStr);
+            const selectedModel = settings.selectedModel || '';
+            const endpoint = settings.customEndpoint || '';
+            
+            // Check model name first (most reliable)
+            if (selectedModel.includes('AIM')) {
+              backendType = 'aim';
+              backendUrl = endpoint || 'http://localhost:8000';
+              backendModel = 'Qwen/Qwen3-32B'; // Default AIM model
+            } else if (selectedModel.includes('LM Studio')) {
+              backendType = 'local';
+              backendUrl = endpoint || 'http://localhost:1234';
+              backendModel = 'default'; // LM Studio uses model from UI
+            } else if (selectedModel.includes('Ollama')) {
+              backendType = 'local';
+              backendUrl = endpoint || 'http://localhost:11434';
+              backendModel = 'default';
+            } else if (selectedModel.includes('Custom')) {
+              // For custom endpoints, detect from URL port
+              // LM Studio uses port 1234 (works with any IP: 192.168.x.x:1234, localhost:1234, etc.)
+              if (endpoint.includes(':1234')) {
+                backendType = 'local';
+                backendUrl = endpoint;
+              } else if (endpoint.includes(':8000')) {
+                backendType = 'aim';
+                backendUrl = endpoint;
+                backendModel = 'Qwen/Qwen3-32B';
+              } else if (endpoint.includes(':11434')) {
+                backendType = 'local';
+                backendUrl = endpoint;
+              } else {
+                // Unknown custom endpoint, default to local
+                backendType = 'local';
+                backendUrl = endpoint || 'http://localhost:1234';
+              }
+            } else {
+              // Fallback: detect from endpoint URL port if model name doesn't match
+              // LM Studio uses port 1234 (any IP address)
+              if (endpoint.includes(':1234')) {
+                backendType = 'local';
+                backendUrl = endpoint;
+              } else if (endpoint.includes(':8000')) {
+                backendType = 'aim';
+                backendUrl = endpoint;
+                backendModel = 'Qwen/Qwen3-32B';
+              } else if (endpoint.includes(':11434')) {
+                backendType = 'local';
+                backendUrl = endpoint;
+              } else {
+                // Use provided endpoint as-is
+                backendType = 'local';
+                backendUrl = endpoint || 'http://localhost:1234';
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Could not read settings for backend routing, using defaults:', e);
+          // Default to LM Studio if settings can't be read
+          backendType = 'local';
+          backendUrl = customEndpoint || 'http://localhost:1234';
+        }
+        
         const taskRequest = {
           task_type: 'reachy_devops_copilot',
           input: {
             prompt: prompt,
-            model: 'Qwen/Qwen3-32B' // Default AIM model
+            model: backendModel
           },
           routing: {
-            backend: 'aim' as const,
-            base_url: 'http://localhost:8000', // Default AIM URL - TODO: get from settings
+            backend: backendType,
+            base_url: backendUrl,
             api_key: apiKey || 'sk-your-api-key' // Use provided API key
           }
         };
         
-        logger.log('Routing through Reachy agent /v1/tasks', { taskRequest });
+        logger.log('Routing through Reachy agent /v1/tasks', { taskRequest, reachyAgentUrl });
         
-        // Submit task
-        const taskResponse = await fetch(`${endpoint}/v1/tasks`, {
+        // Submit task to Reachy agent (always use localhost:9001)
+        const taskResponse = await fetch(`${reachyAgentUrl}/v1/tasks`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -225,40 +296,71 @@ export const useChat = ({
         
         // Poll for task completion
         let pollAttempts = 0;
-        const maxPollAttempts = 120; // 2 minutes max (1 second intervals)
+        const maxPollAttempts = 180; // 3 minutes max (1 second intervals) - increased for backend inference
         let finalTaskStatus: any = null;
+        
+        logger.log('Starting to poll for task completion', { taskId, maxPollAttempts });
         
         while (pollAttempts < maxPollAttempts) {
           await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
           
           if (controller.signal.aborted) {
+            logger.warn('Polling aborted by controller', { taskId, pollAttempts });
             throw new Error('Request aborted');
           }
           
-          const statusResponse = await fetch(`${endpoint}/v1/tasks/${taskId}`, {
-            headers: {
-              ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
-            },
-            signal: controller.signal,
-          });
-          
-          if (!statusResponse.ok) {
-            throw new Error(`Failed to get task status: ${statusResponse.status}`);
-          }
-          
-          finalTaskStatus = await statusResponse.json();
-          
-          if (finalTaskStatus.state === 'completed') {
-            logger.log('Task completed', { taskId, result: finalTaskStatus.result });
-            break;
-          } else if (finalTaskStatus.state === 'failed') {
-            throw new Error(finalTaskStatus.error || 'Task failed');
+          try {
+            const statusResponse = await fetch(`${reachyAgentUrl}/v1/tasks/${taskId}`, {
+              headers: {
+                ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
+              },
+              signal: controller.signal,
+            });
+            
+            if (!statusResponse.ok) {
+              logger.warn('Task status request failed', { taskId, status: statusResponse.status });
+              throw new Error(`Failed to get task status: ${statusResponse.status}`);
+            }
+            
+            finalTaskStatus = await statusResponse.json();
+            
+            logger.log('Task status poll', { 
+              taskId, 
+              state: finalTaskStatus.state, 
+              pollAttempts,
+              hasResult: !!finalTaskStatus.result 
+            });
+            
+            if (finalTaskStatus.state === 'completed') {
+              logger.log('Task completed', { taskId, result: finalTaskStatus.result });
+              break;
+            } else if (finalTaskStatus.state === 'failed') {
+              logger.error('Task failed', { taskId, error: finalTaskStatus.error });
+              throw new Error(finalTaskStatus.error || 'Task failed');
+            }
+          } catch (fetchError: any) {
+            // If it's an abort error, re-throw it
+            if (fetchError.name === 'AbortError' || controller.signal.aborted) {
+              logger.warn('Polling aborted during fetch', { taskId, pollAttempts });
+              throw new Error('Request aborted');
+            }
+            // Otherwise, log and continue polling (network errors, etc.)
+            logger.warn('Error polling task status, will retry', { 
+              taskId, 
+              error: fetchError.message,
+              pollAttempts 
+            });
           }
           
           pollAttempts++;
         }
         
         if (!finalTaskStatus || finalTaskStatus.state !== 'completed') {
+          logger.error('Task did not complete within timeout', { 
+            taskId, 
+            finalState: finalTaskStatus?.state,
+            pollAttempts 
+          });
           throw new Error('Task did not complete within timeout');
         }
         

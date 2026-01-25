@@ -6,12 +6,187 @@ import { useToast } from '../hooks/useToast';
 import type { Robot } from '../services/fleetApi';
 import './FleetPage.css';
 
+interface StatusCheckModalProps {
+  robot: Robot;
+  isOpen: boolean;
+  onClose: () => void;
+  onRefresh: () => void;
+}
+
+const StatusCheckModal: React.FC<StatusCheckModalProps> = ({ robot, isOpen, onClose, onRefresh }) => {
+  const [checking, setChecking] = useState(false);
+  const [health, setHealth] = useState<Robot['health']>(robot.health);
+  const [config, setConfig] = useState<any>(null);
+  const { showToast } = useToast();
+
+  useEffect(() => {
+    if (isOpen && robot.url) {
+      performStatusCheck();
+    }
+  }, [isOpen, robot.url]);
+
+  const performStatusCheck = async () => {
+    setChecking(true);
+    try {
+      const [healthData, configData] = await Promise.all([
+        fleetApi.getAgentHealth(robot.url).catch(() => null),
+        robot.id === 'reachy-001' 
+          ? fleetApi.getAgentConfig(robot.url).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      
+      setHealth(healthData);
+      setConfig(configData);
+      
+      if (healthData) {
+        showToast('Status check completed', 'success');
+      } else {
+        showToast('Status check failed - agent may be offline', 'error');
+      }
+    } catch (err) {
+      console.error('Status check error:', err);
+      showToast('Failed to check status', 'error');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="status-modal-overlay" onClick={onClose}>
+      <div className="status-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="status-modal-header">
+          <h2>Status Check: {robot.name}</h2>
+          <button className="status-modal-close" onClick={onClose}>×</button>
+        </div>
+        
+        <div className="status-modal-body">
+          {checking ? (
+            <div className="status-checking">
+              <div className="status-spinner"></div>
+              <p>Checking status...</p>
+            </div>
+          ) : (
+            <>
+              <div className="status-section">
+                <h3>Health Status</h3>
+                <div className="status-grid">
+                  <div className="status-item">
+                    <span className="status-label">Overall Status</span>
+                    <span className={`status-value status-${health?.status || 'offline'}`}>
+                      {health?.status?.toUpperCase() || 'OFFLINE'}
+                    </span>
+                  </div>
+                  <div className="status-item">
+                    <span className="status-label">Sensors</span>
+                    <span className={`status-value ${health?.sensors_ok ? 'status-ok' : 'status-error'}`}>
+                      {health?.sensors_ok ? '✓ OK' : '✗ FAILED'}
+                    </span>
+                  </div>
+                  <div className="status-item">
+                    <span className="status-label">Actuators</span>
+                    <span className={`status-value ${health?.actuators_ok ? 'status-ok' : 'status-error'}`}>
+                      {health?.actuators_ok ? '✓ OK' : '✗ FAILED'}
+                    </span>
+                  </div>
+                  {health?.uptime_seconds !== undefined && (
+                    <div className="status-item">
+                      <span className="status-label">Uptime</span>
+                      <span className="status-value">
+                        {Math.floor(health.uptime_seconds / 3600)}h {Math.floor((health.uptime_seconds % 3600) / 60)}m
+                      </span>
+                    </div>
+                  )}
+                  {health?.last_seen && (
+                    <div className="status-item">
+                      <span className="status-label">Last Seen</span>
+                      <span className="status-value">
+                        {new Date(health.last_seen).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {config && robot.id === 'reachy-001' && (
+                <div className="status-section">
+                  <h3>Configuration</h3>
+                  <div className="status-grid">
+                    <div className="status-item">
+                      <span className="status-label">Hardware Mode</span>
+                      <span className={`status-value ${config.runtime.hardware_enabled ? 'status-ok' : 'status-warning'}`}>
+                        {config.runtime.hardware_enabled ? 'ENABLED' : 'DISABLED'}
+                      </span>
+                    </div>
+                    <div className="status-item">
+                      <span className="status-label">Driver Connected</span>
+                      <span className={`status-value ${config.runtime.driver_connected ? 'status-ok' : 'status-error'}`}>
+                        {config.runtime.driver_connected ? '✓ CONNECTED' : '✗ NOT CONNECTED'}
+                      </span>
+                    </div>
+                    <div className="status-item">
+                      <span className="status-label">Audio Enabled</span>
+                      <span className={`status-value ${config.runtime.audio_enabled ? 'status-ok' : 'status-warning'}`}>
+                        {config.runtime.audio_enabled ? 'ENABLED' : 'DISABLED'}
+                      </span>
+                    </div>
+                    <div className="status-item">
+                      <span className="status-label">Mocked Mode</span>
+                      <span className={`status-value ${config.runtime.current_mocked ? 'status-warning' : 'status-ok'}`}>
+                        {config.runtime.current_mocked ? 'YES' : 'NO'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="status-section">
+                <h3>Robot Information</h3>
+                <div className="status-grid">
+                  <div className="status-item">
+                    <span className="status-label">Robot ID</span>
+                    <span className="status-value">{robot.id}</span>
+                  </div>
+                  <div className="status-item">
+                    <span className="status-label">Type</span>
+                    <span className="status-value">{robot.type}</span>
+                  </div>
+                  <div className="status-item">
+                    <span className="status-label">Backend</span>
+                    <span className="status-value">{robot.backend}</span>
+                  </div>
+                  <div className="status-item">
+                    <span className="status-label">URL</span>
+                    <span className="status-value status-url">{robot.url}</span>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="status-modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>
+            Close
+          </button>
+          <button className="btn btn-primary" onClick={performStatusCheck} disabled={checking}>
+            {checking ? 'Checking...' : 'Refresh Status'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const FleetPage: React.FC = () => {
   const navigate = useNavigate();
   const { robots, loading, error, refetch } = useFleet();
   const { showToast } = useToast();
   const [hardwareEnabled, setHardwareEnabled] = useState<Record<string, boolean>>({});
   const [loadingConfig, setLoadingConfig] = useState<Record<string, boolean>>({});
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [selectedRobot, setSelectedRobot] = useState<Robot | null>(null);
 
   const getStatusColor = (status: Robot['status']) => {
     switch (status) {
@@ -38,6 +213,11 @@ export const FleetPage: React.FC = () => {
 
   const handleView = (robotId: string) => {
     navigate(`/runs?robot=${robotId}`);
+  };
+
+  const handleCheckStatus = (robot: Robot) => {
+    setSelectedRobot(robot);
+    setStatusModalOpen(true);
   };
 
   // Load hardware config for Reachy Mini
@@ -234,6 +414,14 @@ export const FleetPage: React.FC = () => {
                   </button>
                 )}
                 <button
+                  className="btn btn-secondary"
+                  onClick={() => handleCheckStatus(robot)}
+                  type="button"
+                  title="Check robot status and health"
+                >
+                  Status
+                </button>
+                <button
                   className="btn btn-primary"
                   onClick={() => handleRunTask(robot.id)}
                   type="button"
@@ -251,6 +439,18 @@ export const FleetPage: React.FC = () => {
             </div>
           ))}
         </div>
+      )}
+
+      {selectedRobot && (
+        <StatusCheckModal
+          robot={selectedRobot}
+          isOpen={statusModalOpen}
+          onClose={() => {
+            setStatusModalOpen(false);
+            setSelectedRobot(null);
+          }}
+          onRefresh={refetch}
+        />
       )}
     </div>
   );

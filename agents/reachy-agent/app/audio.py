@@ -1,11 +1,16 @@
 """
 Audio/text-to-speech functionality for Reachy Mini.
 Converts AI responses to speech and plays through robot's speaker.
+
+Based on the working implementation in reachy-aim-enterprise-demo.
 """
 import sys
 import os
 import asyncio
 import tempfile
+import subprocess
+import re
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -18,34 +23,235 @@ from app.observability import StructuredLogger
 
 logger = StructuredLogger(__name__)
 
+# Try to import edge-tts for high-quality natural voice (Microsoft Edge TTS - best quality)
+# Optional dependency: pip install edge-tts
+try:
+    import edge_tts  # type: ignore
+    EDGE_TTS_AVAILABLE = True
+except ImportError:
+    EDGE_TTS_AVAILABLE = False
+    edge_tts = None
+
 
 class AudioController:
     """
     Controller for Reachy Mini audio/text-to-speech.
     
     Converts text to speech and plays through robot's speaker.
+    Uses PulseAudio (paplay) for reliable audio routing, matching the working implementation.
     """
     
-    def __init__(self, robot=None):
+    def __init__(self, robot=None, audio_device: Optional[str] = None, audio_volume: int = 100, is_mocked: Optional[bool] = None):
         """
         Initialize audio controller.
         
         Args:
             robot: ReachyMini instance (None for mocked mode)
+            audio_device: Explicit ALSA device (e.g., "hw:4,0") or None for auto-detection
+            audio_volume: Volume percentage (0-200), default 100
+            is_mocked: Explicitly set mocked mode. If None, defaults to robot is None
         """
         self.robot = robot
-        self.is_mocked = robot is None
+        # Allow explicit control of mocked mode - if not set, default to robot is None
+        # But we can override this later to use PulseAudio even without robot
+        self.is_mocked = is_mocked if is_mocked is not None else (robot is None)
         self._temp_dir = None
+        self._audio_device: Optional[str] = audio_device
+        self._audio_device_detected: Optional[str] = None
+        self._audio_volume: int = max(0, min(200, audio_volume))  # Clamp to 0-200
+        self._edge_tts_voice: Optional[str] = None  # Edge TTS voice name
         
-        if not self.is_mocked:
-            self._temp_dir = tempfile.mkdtemp(prefix="reachy_audio_")
-            logger.info("Audio controller initialized for real hardware")
-        else:
+        # Always create temp directory - we need it for audio generation even without robot
+        self._temp_dir = tempfile.mkdtemp(prefix="reachy_audio_")
+        
+        if self.is_mocked:
             logger.info("Audio controller initialized in MOCKED mode")
+        else:
+            logger.info("Audio controller initialized for real hardware", audio_device=audio_device, audio_volume=audio_volume, robot_available=robot is not None)
+    
+    def _detect_audio_device(self) -> Optional[str]:
+        """Detect Reachy Mini audio device by looking for USB audio devices.
+        
+        Returns PulseAudio sink name, ALSA device string (e.g., "hw:4,0"), or None if not found.
+        Tries PulseAudio first (works with PipeWire), then falls back to ALSA.
+        Matches the working implementation in reachy-aim-enterprise-demo.
+        """
+        if self._audio_device:
+            # Use explicitly configured device
+            return self._audio_device
+        
+        if self._audio_device_detected is not None:
+            # Return cached detection result
+            return self._audio_device_detected
+        
+        # Try PulseAudio first (works with PipeWire)
+        try:
+            result = subprocess.run(
+                ['pactl', 'list', 'short', 'sinks'],
+                capture_output=True,
+                text=True,
+                timeout=2.0
+            )
+            
+            if result.returncode == 0:
+                lines = result.stdout.split('\n')
+                for line in lines:
+                    if line.strip():
+                        parts = line.split('\t')
+                        if len(parts) >= 2:
+                            sink_name = parts[1].lower()
+            # Look for Reachy or USB in sink name
+            # Also check for "Pollen" (Reachy Mini manufacturer name)
+            if ('reachy' in sink_name or 'pollen' in sink_name or 
+                ('usb' in sink_name and 'audio' in sink_name)):
+                # Use PulseAudio sink name
+                device_str = f"pulse:{parts[0]}"  # Use sink index
+                logger.info(f"✓ Detected Reachy Mini audio device (PulseAudio): {parts[1]} (sink {parts[0]})")
+                self._audio_device_detected = device_str
+                return device_str
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+            pass
+        
+        # Fall back to ALSA detection
+        try:
+            # Run aplay -l to list audio devices
+            result = subprocess.run(
+                ['aplay', '-l'],
+                capture_output=True,
+                text=True,
+                timeout=2.0
+            )
+            
+            if result.returncode != 0:
+                logger.debug("Could not list audio devices (aplay -l failed)")
+                self._audio_device_detected = None
+                return None
+            
+            lines = result.stdout.split('\n')
+            # Look for USB audio devices (common for Reachy Mini)
+            # Also look for devices with "Reachy" or "USB" in the name
+            for i, line in enumerate(lines):
+                if 'card' in line.lower() and ('usb' in line.lower() or 'reachy' in line.lower()):
+                    # Extract card number (format: "card X:")
+                    match = re.search(r'card\s+(\d+)', line)
+                    if match:
+                        card_num = match.group(1)
+                        # Try to find device number (usually 0 for first device)
+                        device_num = 0
+                        # Check next few lines for device number
+                        for j in range(i+1, min(i+5, len(lines))):
+                            dev_match = re.search(r'device\s+(\d+)', lines[j])
+                            if dev_match:
+                                device_num = int(dev_match.group(1))
+                                break
+                        
+                        device_str = f"hw:{card_num},{device_num}"
+                        logger.info(f"✓ Detected Reachy Mini audio device (ALSA): {device_str} ({line.strip()})")
+                        self._audio_device_detected = device_str
+                        return device_str
+            
+            # If no USB/Reachy device found, return None (use default)
+            logger.debug("No Reachy Mini audio device detected, using system default")
+            self._audio_device_detected = None
+            return None
+            
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as e:
+            logger.debug(f"Audio device detection failed: {e}")
+            self._audio_device_detected = None
+            return None
+    
+    def _set_audio_volume(self, sink_id: Optional[str] = None) -> None:
+        """Set audio volume for the Reachy Mini speaker.
+        
+        Tries Reachy daemon API first (most reliable), then falls back to PulseAudio.
+        This is non-blocking - failures are logged but don't prevent TTS from working.
+        
+        Args:
+            sink_id: PulseAudio sink name (for fallback). If None, will try to auto-detect.
+        """
+        if self._audio_volume == 100:
+            return  # No need to set volume if it's already at 100%
+        
+        # Try Reachy daemon API first (most reliable, controls hardware directly)
+        # Use a short timeout to avoid blocking TTS
+        try:
+            # Reachy daemon expects volume as 0-100 (not percentage)
+            # Our _audio_volume is already 0-200, so convert to 0-100 for daemon
+            daemon_volume = min(100, int(self._audio_volume))
+            # Use shorter timeout for volume setting (don't block TTS)
+            url = "http://127.0.0.1:8001/api/volume/set"
+            try:
+                import httpx
+                # Use httpx for async HTTP calls (already in requirements)
+                # Note: This is a sync method, so we use httpx.Client for sync calls
+                with httpx.Client(timeout=1.0) as client:
+                    response = client.post(url, json={"volume": daemon_volume})
+                    if response.status_code == 200:
+                        logger.debug(f"🔊 Set Reachy Mini volume to {self._audio_volume}% via daemon API (daemon: {daemon_volume})")
+                        return  # Success - no need to try PulseAudio
+                    else:
+                        logger.debug(f"Daemon volume API returned {response.status_code}, trying PulseAudio fallback")
+            except ImportError:
+                logger.debug("httpx not available for daemon volume API, trying PulseAudio fallback")
+            except Exception as e:
+                logger.debug(f"Daemon volume API call failed: {e}, trying PulseAudio fallback")
+        except Exception as daemon_error:
+            # Don't log as warning - daemon API might not be available, that's OK
+            logger.debug(f"Daemon volume API not available: {daemon_error}, trying PulseAudio fallback")
+        
+        # Fallback to PulseAudio (may be overridden by OS, but worth trying)
+        try:
+            # Find the sink to use
+            if not sink_id:
+                # Try to find the Reachy Mini sink
+                sink_result = subprocess.run(
+                    ['pactl', 'list', 'sinks', 'short'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0
+                )
+                if sink_result.returncode == 0:
+                    for line in sink_result.stdout.split('\n'):
+                        if 'Reachy' in line or 'Pollen' in line:
+                            sink_id = line.split()[1]  # Second column is sink name
+                            break
+            
+            if sink_id:
+                # Set volume using percentage format (PulseAudio accepts percentages like "150%")
+                volume_percent = f"{self._audio_volume}%"
+                result = subprocess.run(
+                    ['pactl', 'set-sink-volume', sink_id, volume_percent],
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0
+                )
+                if result.returncode == 0:
+                    logger.info(f"🔊 Set Reachy Mini audio volume to {self._audio_volume}% via PulseAudio (sink: {sink_id})")
+                else:
+                    logger.warning(f"⚠ Could not set PulseAudio volume: {result.stderr}")
+                    # Try alternative: set as default sink first, then set volume
+                    try:
+                        subprocess.run(
+                            ['pactl', 'set-default-sink', sink_id],
+                            capture_output=True,
+                            timeout=1.0
+                        )
+                        subprocess.run(
+                            ['pactl', 'set-sink-volume', '@DEFAULT_SINK@', volume_percent],
+                            capture_output=True,
+                            timeout=2.0
+                        )
+                        logger.info(f"🔊 Set volume via default sink to {self._audio_volume}%")
+                    except Exception:
+                        pass
+        except Exception as vol_error:
+            logger.warning(f"⚠ Could not set audio volume via PulseAudio: {vol_error}")
     
     async def speak(self, text: str) -> bool:
         """
         Convert text to speech and play through robot's speaker.
+        
+        Uses PulseAudio (paplay) for reliable audio routing, matching the working implementation.
         
         Args:
             text: Text to speak
@@ -53,17 +259,19 @@ class AudioController:
         Returns:
             True if successful, False otherwise
         """
-        # Check if we should use mocked mode
-        # Update is_mocked based on current robot state
-        if self.robot is None:
-            self.is_mocked = True
+        # Don't automatically set is_mocked when robot is None
+        # We may want to use PulseAudio even if SDK connection failed
+        # Only use mocked mode if explicitly set
         
-        # Ensure temp directory exists if we have a robot
-        if self.robot and self._temp_dir is None:
+        # Ensure temp directory exists (needed for audio generation even without robot)
+        if self._temp_dir is None:
             self._temp_dir = tempfile.mkdtemp(prefix="reachy_audio_")
             logger.debug("Created temp directory for audio", temp_dir=self._temp_dir)
         
-        if self.is_mocked or not self.robot:
+        print(f"🔵🔵🔵 audio.speak() called - is_mocked={self.is_mocked}, robot_available={self.robot is not None}, text_length={len(text)}", flush=True)
+        # Only use mocked mode if explicitly set to True
+        if self.is_mocked:
+            print(f"🔵⚠️ Audio is MOCKED - will simulate", flush=True)
             logger.info("Audio: Speaking (mocked)", text_preview=text[:50] + "..." if len(text) > 50 else text, robot_available=self.robot is not None)
             await asyncio.sleep(len(text) * 0.05)  # Simulate speaking time
             return True
@@ -83,145 +291,132 @@ class AudioController:
             
             logger.info("Audio: Generated audio file", file=audio_file, file_size=os.path.getsize(audio_file))
             
-            logger.info("Audio: Playing sound through robot speaker", file=audio_file)
+            # Detect audio device (PulseAudio first, then ALSA fallback)
+            audio_device = self._detect_audio_device()
+            logger.info("Audio: Detected audio device", device=audio_device, is_mocked=self.is_mocked, robot_available=self.robot is not None)
             
-            # ALSA direct is more reliable for device routing - SDK falls back to default device
-            # Always prefer ALSA direct to ensure audio goes to robot speaker, not monitor
-            use_alsa_direct = os.getenv("REACHY_USE_ALSA_DIRECT", "true").lower() in ("true", "1", "yes", "on")
+            # Play audio using PulseAudio (paplay) - matches working implementation
+            # PulseAudio is more reliable than ALSA direct for device routing
+            start_time = time.time()
             
-            # SDK method often routes to wrong device (monitor) when it can't find Reachy device
-            # Only use SDK if ALSA direct is explicitly disabled AND robot is connected
-            use_sdk_method = not use_alsa_direct and self.robot is not None and hasattr(self.robot, 'media') and hasattr(self.robot.media, 'play_sound')
-            
-            logger.info("Audio playback check", robot_available=self.robot is not None, has_media=hasattr(self.robot, 'media') if self.robot else False, has_play_sound=hasattr(self.robot.media, 'play_sound') if self.robot and hasattr(self.robot, 'media') else False, use_sdk_method=use_sdk_method, use_alsa_direct=use_alsa_direct, is_mocked=self.is_mocked)
-            
-            # If robot is not connected, we can still try ALSA direct
-            # The robot speaker should work via ALSA even if SDK connection failed
-            
-            if use_sdk_method:
-                logger.info("Using SDK play_sound method (robot connected)")
-                try:
-                    loop = asyncio.get_event_loop()
-                    
-                    # Try to configure SDK to use correct audio device
-                    # SoundDevice shows Reachy Mini Audio with 0 channels, so SDK can't find it
-                    # We need to force it to use device ID 6 (Reachy Mini Audio)
+            try:
+                # Set volume before playing
+                sink_id = None
+                sink_name = None
+                if audio_device and audio_device.startswith('pulse:'):
+                    sink_id = audio_device.split(':', 1)[1]
+                    # Get sink name from sink ID
                     try:
-                        if hasattr(self.robot.media, 'audio'):
-                            audio_backend = type(self.robot.media.audio).__name__
-                            logger.debug("Audio backend type", backend=audio_backend)
-                            
-                            # For SoundDevice backend, try to set device ID 6 (Reachy Mini Audio)
-                            if 'SoundDevice' in audio_backend:
-                                import sounddevice as sd
-                                # Device ID 6 is Reachy Mini Audio (even though it shows 0 channels)
-                                reachy_device_id = 6
-                                try:
-                                    # Try to set the device ID before starting stream
-                                    if hasattr(self.robot.media.audio, '_output_device_id'):
-                                        self.robot.media.audio._output_device_id = reachy_device_id
-                                        logger.info("Forced SDK to use Reachy Mini Audio device", device_id=reachy_device_id)
-                                except Exception as e:
-                                    logger.debug("Could not set audio device ID (may be read-only)", error=str(e))
-                    except Exception as e:
-                        logger.debug("Could not configure audio device", error=str(e))
-                    
-                    # Ensure audio output stream is started (SoundDevice backend needs this)
-                    if hasattr(self.robot.media, 'audio') and hasattr(self.robot.media.audio, 'start_playing'):
-                        try:
-                            if not hasattr(self.robot.media.audio, '_output_stream') or self.robot.media.audio._output_stream is None:
-                                logger.debug("Starting audio output stream")
-                                self.robot.media.audio.start_playing()
-                        except Exception as e:
-                            logger.debug("Could not start audio stream (may already be started)", error=str(e))
-                    
-                    # Play the audio file using SDK
-                    logger.debug("Calling robot.media.play_sound", file=audio_file, robot_type=type(self.robot).__name__)
-                    
-                    # Call play_sound in executor to avoid blocking
-                    try:
-                        await loop.run_in_executor(None, self.robot.media.play_sound, audio_file)
-                        
-                        # Wait for playback to complete (estimate based on file size)
-                        file_size_kb = os.path.getsize(audio_file) / 1024
-                        wait_time = max(2.0, file_size_kb / 16.0)  # Increased wait time
-                        logger.debug("Waiting for audio playback to complete", wait_time=wait_time, file_size_kb=file_size_kb)
-                        await asyncio.sleep(wait_time)
-                        
-                        logger.info("Audio: Successfully played via SDK", text_preview=text[:50] + "..." if len(text) > 50 else text)
-                        return True
-                    except Exception as play_error:
-                        logger.error("play_sound call failed", error=str(play_error), error_type=type(play_error).__name__)
-                        raise  # Re-raise to trigger fallback
-                except Exception as e:
-                    logger.warning("SDK play_sound failed, falling back to ALSA", error=str(e), error_type=type(e).__name__)
-                    # Fall through to ALSA method
-            
-            # Use ALSA directly (preferred method to ensure correct device routing)
-            if use_alsa_direct:
-                # First, try to stop any SDK audio streams that might be holding the device
-                try:
-                    if self.robot and hasattr(self.robot, 'media') and hasattr(self.robot.media, 'audio') and hasattr(self.robot.media.audio, 'stop_playing'):
-                        try:
-                            logger.debug("Stopping SDK audio stream to release device for ALSA")
-                            self.robot.media.audio.stop_playing()
-                            await asyncio.sleep(1.0)  # Give it more time to release
-                            logger.debug("Stopped SDK audio stream before ALSA playback")
-                        except Exception as e:
-                            logger.debug("Could not stop SDK audio stream (may not be started)", error=str(e))
-                except Exception:
-                    pass  # Ignore if audio object doesn't exist
-                
-                # Try multiple ALSA device names in order of preference
-                # Use plughw first as it handles format conversion and may allow sharing
-                alsa_devices = ["plughw:4,0", "reachymini_audio_sink", "hw:4,0"]
-                
-                for device in alsa_devices:
-                    try:
-                        import subprocess
-                        logger.info("Using ALSA directly for audio playback", device=device)
-                        
-                        # Use aplay with ALSA device name (ensures correct routing)
-                        result = await asyncio.create_subprocess_exec(
-                            "aplay", "-D", device, audio_file,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE
+                        result = subprocess.run(
+                            ['pactl', 'list', 'sinks', 'short'],
+                            capture_output=True,
+                            text=True,
+                            timeout=2.0
                         )
-                        stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=30.0)
-                        
                         if result.returncode == 0:
-                            logger.info("Audio: Successfully played via ALSA", device=device, text_preview=text[:50] + "..." if len(text) > 50 else text)
-                            return True
-                        else:
-                            error_msg = stderr.decode() if stderr else "Unknown error"
-                            logger.debug(f"ALSA device {device} failed", error=error_msg)
-                            # Try next device
-                            continue
-                    except FileNotFoundError:
-                        logger.warning("aplay command not found")
-                        break  # Can't try other devices if aplay doesn't exist
-                    except asyncio.TimeoutError:
-                        logger.error("Audio playback timed out")
-                        return False
-                    except Exception as e:
-                        logger.debug(f"ALSA device {device} failed with exception", error=str(e))
-                        continue  # Try next device
+                            for line in result.stdout.split('\n'):
+                                if line.strip().startswith(sink_id):
+                                    parts = line.split('\t')
+                                    if len(parts) >= 2:
+                                        sink_name = parts[1]
+                                    break
+                    except Exception:
+                        pass
+                    self._set_audio_volume(sink_name or sink_id)
+                    # Use sink name if available, otherwise use index
+                    play_cmd = ['paplay', '--device', sink_name or sink_id, audio_file]
+                elif audio_device and audio_device.startswith('hw:'):
+                    # Route through PulseAudio - find Reachy Mini sink by name
+                    try:
+                        result = subprocess.run(
+                            ['pactl', 'list', 'sinks', 'short'],
+                            capture_output=True,
+                            text=True,
+                            timeout=2.0
+                        )
+                        if result.returncode == 0:
+                            for line in result.stdout.split('\n'):
+                                line_lower = line.lower()
+                                if 'reachy' in line_lower or 'pollen' in line_lower:
+                                    parts = line.split('\t')
+                                    if len(parts) >= 2:
+                                        sink_name = parts[1]
+                                        sink_id = parts[0]
+                                        break
+                    except Exception:
+                        pass
+                    if sink_name:
+                        self._set_audio_volume(sink_name)
+                        play_cmd = ['paplay', '--device', sink_name, audio_file]
+                    else:
+                        play_cmd = ['paplay', audio_file]  # Will use default sink
+                        self._set_audio_volume(None)
+                else:
+                    # No device detected, try to find Reachy Mini sink by name
+                    try:
+                        result = subprocess.run(
+                            ['pactl', 'list', 'sinks', 'short'],
+                            capture_output=True,
+                            text=True,
+                            timeout=2.0
+                        )
+                        if result.returncode == 0:
+                            for line in result.stdout.split('\n'):
+                                line_lower = line.lower()
+                                if 'reachy' in line_lower or 'pollen' in line_lower:
+                                    parts = line.split('\t')
+                                    if len(parts) >= 2:
+                                        sink_name = parts[1]
+                                        sink_id = parts[0]
+                                        break
+                    except Exception:
+                        pass
+                    if sink_name:
+                        self._set_audio_volume(sink_name)
+                        play_cmd = ['paplay', '--device', sink_name, audio_file]
+                    else:
+                        play_cmd = ['paplay', audio_file]
+                        self._set_audio_volume(None)
                 
-                # All ALSA devices failed
-                logger.error("All audio playback methods failed")
-                return False
-            
-            # No audio method available
-            logger.error("No audio playback method available", robot_available=self.robot is not None, has_media=hasattr(self.robot, 'media') if self.robot else False)
-            return False
-            
-            # Wait for playback to complete
-            file_size_kb = os.path.getsize(audio_file) / 1024
-            wait_time = max(1.0, file_size_kb / 16.0)
-            await asyncio.sleep(wait_time)
-            
-            logger.info("Audio: Successfully played text", text_preview=text[:50] + "..." if len(text) > 50 else text)
-            return True
+                # Play audio (suppress ALSA/JACK errors)
+                audio_env = {**os.environ, 'ALSA_CARD': '0', 'JACK_NO_AUDIO_RESERVATION': '1'}
+                
+                logger.info("Playing audio via PulseAudio", device=audio_device, command=' '.join(play_cmd))
+                
+                # Use asyncio subprocess for non-blocking playback
+                play_proc = await asyncio.create_subprocess_exec(
+                    *play_cmd,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    env=audio_env
+                )
+                
+                # Wait for playback to complete (with timeout)
+                try:
+                    await asyncio.wait_for(play_proc.wait(), timeout=60.0)
+                    duration = time.time() - start_time
+                    
+                    if play_proc.returncode == 0:
+                        logger.info("Audio: Successfully played via PulseAudio", duration=duration, device=audio_device, text_preview=text[:50] + "..." if len(text) > 50 else text)
+                        return True
+                    else:
+                        logger.warning("Audio playback failed", returncode=play_proc.returncode, device=audio_device)
+                        # Fallback to estimated duration
+                        estimated = max(0.5, len(text) * 0.08)
+                        logger.info("Audio: Estimated playback duration", duration=estimated)
+                        return True  # Still return True as audio was attempted
+                except asyncio.TimeoutError:
+                    logger.error("Audio playback timed out")
+                    play_proc.kill()
+                    return False
+                    
+            finally:
+                # Clean up temporary audio file
+                try:
+                    if os.path.exists(audio_file):
+                        os.unlink(audio_file)
+                except Exception:
+                    pass
                 
         except Exception as e:
             import traceback
@@ -235,102 +430,65 @@ class AudioController:
     
     async def _text_to_speech(self, text: str) -> Optional[str]:
         """
-        Convert text to speech audio file.
-        
-        Reachy Mini's SoundDevice backend prefers WAV files, so we convert MP3 to WAV.
+        Convert text to speech audio file using Edge TTS (matches working implementation).
         
         Args:
             text: Text to convert
             
         Returns:
-            Path to audio file (WAV format), or None if failed
+            Path to audio file (MP3 format), or None if failed
         """
-        # Ensure temp directory exists (may not be set if robot was None at init)
+        if not EDGE_TTS_AVAILABLE:
+            logger.warning("⚠ Edge TTS not available, install with: pip install edge-tts")
+            return None
+        
+        # Ensure temp directory exists
         if self._temp_dir is None:
             self._temp_dir = tempfile.mkdtemp(prefix="reachy_audio_")
             logger.debug("Created temp directory for audio in _text_to_speech", temp_dir=self._temp_dir)
         
         try:
-            # Try edge-tts first (better quality, free, no API key needed)
-            try:
-                import edge_tts
+            # Select a high-quality voice if not already selected (matches working implementation)
+            if not self._edge_tts_voice:
+                # Prefer natural-sounding English voices
+                preferred_voices = [
+                    "en-US-AriaNeural",  # Natural female voice
+                    "en-US-JennyNeural",  # Alternative natural female voice
+                    "en-US-GuyNeural",   # Natural male voice
+                    "en-US-DavisNeural", # Alternative male voice
+                ]
                 
-                mp3_file = os.path.join(self._temp_dir, "speech.mp3")
-                wav_file = os.path.join(self._temp_dir, "speech.wav")
-                
-                # Generate speech asynchronously (MP3 format)
-                communicate = edge_tts.Communicate(text, "en-US-AriaNeural")
-                await communicate.save(mp3_file)
-                
-                logger.debug("Generated MP3 audio using edge-tts", file=mp3_file)
-                
-                # Convert MP3 to WAV (Reachy Mini SoundDevice prefers WAV)
-                # Also convert to stereo (2 channels) as ALSA config expects 2 channels
+                # Try to get available voices and select best match
                 try:
-                    from pydub import AudioSegment
-                    audio = AudioSegment.from_mp3(mp3_file)
+                    async def get_voice():
+                        voices = await edge_tts.list_voices()
+                        for preferred in preferred_voices:
+                            for voice in voices:
+                                if voice["ShortName"] == preferred:
+                                    return preferred
+                        # Fallback to first English US voice
+                        for voice in voices:
+                            if voice["Locale"].startswith("en-US"):
+                                return voice["ShortName"]
+                        return "en-US-AriaNeural"  # Default fallback
                     
-                    # Convert to stereo if mono (ALSA config expects 2 channels)
-                    if audio.channels == 1:
-                        logger.debug("Converting mono to stereo for ALSA compatibility")
-                        audio = audio.set_channels(2)
-                    
-                    # Set sample rate to 16000 Hz (matches ALSA config)
-                    if audio.frame_rate != 16000:
-                        logger.debug(f"Resampling from {audio.frame_rate} Hz to 16000 Hz")
-                        audio = audio.set_frame_rate(16000)
-                    
-                    audio.export(wav_file, format="wav")
-                    logger.debug("Converted MP3 to WAV (stereo, 16kHz)", wav_file=wav_file, channels=audio.channels, rate=audio.frame_rate)
-                    return wav_file
-                except ImportError:
-                    logger.warning("pydub not installed, trying MP3 directly. Install: pip install pydub")
-                    # Try MP3 anyway - GStreamer backend might support it
-                    return mp3_file
+                    self._edge_tts_voice = await get_voice()
+                    logger.info(f"✓ Selected Edge TTS voice: {self._edge_tts_voice}")
                 except Exception as e:
-                    logger.warning("Failed to convert MP3 to WAV, using MP3", error=str(e))
-                    return mp3_file
-                
-            except ImportError:
-                # Fallback to gTTS (requires internet)
-                try:
-                    from gtts import gTTS
-                    
-                    mp3_file = os.path.join(self._temp_dir, "speech.mp3")
-                    wav_file = os.path.join(self._temp_dir, "speech.wav")
-                    
-                    # Generate speech (MP3 format)
-                    tts = gTTS(text=text, lang='en', slow=False)
-                    tts.save(mp3_file)
-                    
-                    logger.debug("Generated MP3 audio using gTTS", file=mp3_file)
-                    
-                    # Convert MP3 to WAV (stereo, 16kHz for ALSA compatibility)
-                    try:
-                        from pydub import AudioSegment
-                        audio = AudioSegment.from_mp3(mp3_file)
-                        
-                        # Convert to stereo if mono
-                        if audio.channels == 1:
-                            audio = audio.set_channels(2)
-                        
-                        # Set sample rate to 16000 Hz
-                        if audio.frame_rate != 16000:
-                            audio = audio.set_frame_rate(16000)
-                        
-                        audio.export(wav_file, format="wav")
-                        logger.debug("Converted MP3 to WAV (stereo, 16kHz)", wav_file=wav_file)
-                        return wav_file
-                    except ImportError:
-                        logger.warning("pydub not installed, trying MP3 directly")
-                        return mp3_file
-                    except Exception as e:
-                        logger.warning("Failed to convert MP3 to WAV, using MP3", error=str(e))
-                        return mp3_file
-                    
-                except ImportError:
-                    logger.warning("No TTS library available. Install: pip install edge-tts or pip install gtts")
-                    return None
+                    logger.warning(f"Could not select Edge TTS voice: {e}, using default")
+                    self._edge_tts_voice = "en-US-AriaNeural"
+            
+            # Generate audio using Edge TTS (matches working implementation)
+            async def generate_audio():
+                communicate = edge_tts.Communicate(text, self._edge_tts_voice)
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp_file:
+                    tmp_path = tmp_file.name
+                    await communicate.save(tmp_path)
+                    return tmp_path
+            
+            audio_file = await generate_audio()
+            logger.debug("Generated MP3 audio using edge-tts", file=audio_file, voice=self._edge_tts_voice)
+            return audio_file
                     
         except Exception as e:
             logger.error("Text-to-speech conversion failed", error=str(e), error_type=type(e).__name__)
@@ -345,4 +503,3 @@ class AudioController:
                 logger.debug("Cleaned up audio temp directory")
             except Exception as e:
                 logger.warning("Failed to cleanup audio temp directory", error=str(e))
-

@@ -74,7 +74,9 @@ class GestureController:
         Indicates task was received and understood.
         Gesture: Quick nod of the head.
         """
+        print(f"🔵🔵🔵 ack_gesture() called - is_mocked={self.is_mocked}, driver_available={self.driver is not None}", flush=True)
         if self.is_mocked:
+            print(f"🔵⚠️ ACK gesture is MOCKED - will simulate", flush=True)
             logger.info("Gesture: ACK (mocked)", gesture="ack")
             await asyncio.sleep(0.5)  # Simulate gesture duration
             return
@@ -233,25 +235,47 @@ class GestureController:
         """
         Return robot to rest position.
         """
+        print(f"🔵🔵🔵 return_to_rest() called - is_mocked={self.is_mocked}, driver_available={self.driver is not None}", flush=True)
         if self.is_mocked:
+            print(f"🔵⚠️ REST gesture is MOCKED - will simulate", flush=True)
             logger.info("Gesture: REST (mocked)", gesture="rest")
             return
         
         try:
+            print(f"🔵 Getting robot for REST gesture...", flush=True)
             robot = await self._get_robot()
             if not robot:
-                logger.warning("Robot not available for REST gesture")
+                print(f"🔵❌ Robot not available for REST gesture", flush=True)
+                logger.warning("Robot not available for REST gesture", driver_available=self.driver is not None, driver_connected=self.driver.is_connected() if self.driver else False)
                 return
             
+            print(f"🔵 Robot obtained for REST gesture, moving to rest position...", flush=True)
             from reachy_mini.utils import create_head_pose
             
-            # Move to neutral/rest position
+            # Make reset more visible - move head slightly first, then to rest
+            # This ensures we can see the movement
+            print(f"🔵 Moving head to visible position first...", flush=True)
+            robot.goto_target(
+                head=create_head_pose(z=-10, roll=0, degrees=True, mm=True),
+                duration=0.4
+            )
+            await asyncio.sleep(0.5)
+            
+            # Now move to neutral/rest position
+            print(f"🔵 Moving head to rest position...", flush=True)
             robot.goto_target(
                 head=create_head_pose(z=0, roll=0, degrees=True, mm=True),
                 duration=0.5
             )
             
+            # Wait for movement to complete
+            await asyncio.sleep(0.6)
+            
+            print(f"🔵✅ REST gesture completed", flush=True)
             logger.info("Gesture: REST", gesture="rest")
         except Exception as e:
-            logger.error("Failed to return to rest", error=str(e), error_type=type(e).__name__)
+            print(f"🔵❌ Failed to return to rest: {str(e)}", flush=True)
+            import traceback
+            print(f"🔵❌ REST traceback: {traceback.format_exc()}", flush=True)
+            logger.error("Failed to return to rest", error=str(e), error_type=type(e).__name__, traceback=traceback.format_exc())
 

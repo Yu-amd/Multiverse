@@ -249,7 +249,8 @@ else:
 
 # Initialize audio controller
 from app.audio import AudioController
-audio_controller = AudioController(robot=None)  # Will be set when robot connects
+# Initialize with is_mocked=False so it can use PulseAudio even if robot connection fails
+audio_controller = AudioController(robot=None, is_mocked=False)  # Will be set when robot connects
 
 # Note: Connection to hardware will happen on first use
 # The driver will attempt to connect when gestures are executed
@@ -295,14 +296,23 @@ async def get_agent_health():
 @app.post("/v1/tasks", response_model=TaskStatus, status_code=status.HTTP_201_CREATED)
 async def create_task(
     task_request: TaskRequest,
-    background_tasks: BackgroundTasks,
     authenticated: bool = Depends(verify_api_key),
 ):
     """
     Submit a new task for execution.
     Implements reachy_devops_copilot task type.
     """
+    # Force output to both stdout and stderr
+    import sys
+    msg1 = f"🔴🔴🔴 POST /v1/tasks CALLED - task_type={task_request.task_type}, prompt={task_request.input.get('prompt', '')[:50] if task_request.input else 'None'}"
+    print(msg1, flush=True)
+    sys.stderr.write(msg1 + "\n")
+    sys.stderr.flush()
     task_id = str(uuid.uuid4())
+    msg2 = f"🔴 Created task_id: {task_id}"
+    print(msg2, flush=True)
+    sys.stderr.write(msg2 + "\n")
+    sys.stderr.flush()
     
     # Get policy defaults
     e2e_slo_ms = (
@@ -353,12 +363,19 @@ async def create_task(
     # This ensures the task runs after the response is sent
     async def safe_execute():
         try:
-            print(f"🔵🔵🔵 BACKGROUND TASK EXECUTING for task_id: {task_id} 🔵🔵🔵", flush=True)
-            logger.info(f"Background task started for task_id: {task_id}")
+            import sys
+            msg5 = f"🔵🔵🔵 BACKGROUND TASK EXECUTING for task_id: {task_id} 🔵🔵🔵"
+            print(msg5, flush=True)
+            sys.stderr.write(msg5 + "\n")
+            sys.stderr.flush()
+            logger.info(f"Background task started for task_id: {task_id}", task_type=task_request.task_type, prompt_preview=task_request.input.get("prompt", "")[:50] if task_request.input else "")
             await execute_task(task_id, task_request)
+            print(f"🔵✅ BACKGROUND TASK COMPLETED for task_id: {task_id} 🔵✅", flush=True)
+            logger.info(f"Background task completed successfully for task_id: {task_id}")
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
+            print(f"🔵❌ BACKGROUND TASK FAILED for task_id: {task_id}: {str(e)}", flush=True)
             logger.error(
                 "Task execution failed with unhandled exception",
                 task_id=task_id,
@@ -372,13 +389,38 @@ async def create_task(
                 tasks[task_id].error = f"Unhandled exception: {str(e)}"
                 tasks[task_id].updated_at = datetime.now(timezone.utc)
     
-    # Add the background task - FastAPI will execute it after the response is sent
-    print(f"🔵 About to add background task for task_id: {task_id}", flush=True)
+    # Create background task using asyncio - FastAPI BackgroundTasks doesn't handle async well
+    # Using asyncio.create_task ensures the async function runs concurrently
+    import sys
+    import asyncio
+    msg3 = f"🔵 About to create background task for task_id: {task_id}"
+    print(msg3, flush=True)
+    sys.stderr.write(msg3 + "\n")
+    sys.stderr.flush()
     logger.info(f"Scheduled background task for task_id: {task_id}")
-    background_tasks.add_task(safe_execute)
-    print(f"🔵✅ Background task added for task_id: {task_id}", flush=True)
-    logger.info(f"Background task added successfully for task_id: {task_id}")
+    try:
+        task = asyncio.create_task(safe_execute())
+        msg4 = f"🔵✅ Background task created for task_id: {task_id}, task object: {task}"
+        print(msg4, flush=True)
+        sys.stderr.write(msg4 + "\n")
+        sys.stderr.flush()
+        # Add done callback to catch any exceptions
+        def task_done_callback(fut):
+            try:
+                fut.result()  # This will raise if there was an exception
+            except Exception as e:
+                print(f"🔵❌❌❌ Background task raised exception: {e}", flush=True)
+                import traceback
+                print(f"🔵❌❌❌ Traceback: {traceback.format_exc()}", flush=True)
+        task.add_done_callback(task_done_callback)
+        logger.info(f"Background task created successfully for task_id: {task_id}")
+    except Exception as e:
+        print(f"🔵❌❌❌ Failed to create background task: {e}", flush=True)
+        import traceback
+        print(f"🔵❌❌❌ Traceback: {traceback.format_exc()}", flush=True)
+        logger.error(f"Failed to create background task: {e}")
     
+    print(f"🔴 Returning task_status for task_id: {task_id}, state: {task_status.state}", flush=True)
     return task_status
 
 
@@ -409,6 +451,7 @@ async def execute_task(task_id: str, task_request: TaskRequest):
             ))
             
             # Ensure driver is connected before performing gesture
+            first_connection = False
             if not reachy_driver.mocked and not reachy_driver.is_connected():
                 logger.info("Attempting to connect to robot before ACK gesture...")
                 try:
@@ -424,6 +467,7 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                     
                     connected = await reachy_driver.connect(force=True)
                     if connected and reachy_driver.is_connected():
+                        first_connection = True  # Mark this as first successful connection
                         robot_instance = reachy_driver.get_robot()
                         logger.info("Successfully connected to robot", driver_connected=reachy_driver.is_connected(), robot_available=robot_instance is not None, robot_type=type(robot_instance).__name__ if robot_instance else None)
                         # Update audio controller with robot instance
@@ -438,10 +482,40 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                 except Exception as e:
                     logger.error("Exception during robot connection attempt", error=str(e), error_type=type(e).__name__)
             
+            # Reset robot to rest position on first successful connection
+            # This ensures the robot starts in a known good pose after being turned off
+            if first_connection and reachy_driver.is_connected():
+                print(f"🔵 First connection successful - resetting robot to rest position...", flush=True)
+                logger.info("First connection after hardware enable - resetting robot to rest position")
+                try:
+                    await asyncio.sleep(0.5)  # Wait a moment for connection to stabilize
+                    await gesture_controller.return_to_rest()
+                    print(f"🔵✅ Robot reset to rest position on first connection", flush=True)
+                    logger.info("Robot reset to rest position on first connection completed")
+                except Exception as reset_error:
+                    print(f"🔵❌ Failed to reset robot on first connection: {str(reset_error)}", flush=True)
+                    logger.warning(
+                        "Failed to reset robot to rest position on first connection",
+                        error=str(reset_error),
+                        error_type=type(reset_error).__name__
+                    )
+                    # Don't fail task execution if reset fails
+            
             # Log gesture attempt state
             robot_before_gesture = reachy_driver.get_robot() if reachy_driver.is_connected() else None
+            print(f"🔵 About to perform ACK gesture - driver_mocked={reachy_driver.mocked}, driver_connected={reachy_driver.is_connected()}, gesture_mocked={gesture_controller.is_mocked}", flush=True)
             logger.info("About to perform ACK gesture", driver_mocked=reachy_driver.mocked, driver_connected=reachy_driver.is_connected(), gesture_controller_mocked=gesture_controller.is_mocked, robot_available=robot_before_gesture is not None, robot_type=type(robot_before_gesture).__name__ if robot_before_gesture else None)
-            await gesture_controller.ack_gesture()
+            try:
+                print(f"🔵 Calling ack_gesture()...", flush=True)
+                await gesture_controller.ack_gesture()
+                print(f"🔵✅ ACK gesture completed", flush=True)
+                logger.info("ACK gesture completed")
+            except Exception as gesture_error:
+                print(f"🔵❌ ACK gesture failed: {str(gesture_error)}", flush=True)
+                logger.error("ACK gesture failed", error=str(gesture_error), error_type=type(gesture_error).__name__)
+                import traceback
+                logger.error("ACK gesture traceback", traceback=traceback.format_exc())
+                # Continue execution even if gesture fails
             
             # Check if this is a DevOps copilot task
             if task_request.task_type != "reachy_devops_copilot":
@@ -467,20 +541,40 @@ async def execute_task(task_id: str, task_request: TaskRequest):
             tasks[task_id].progress = 0.2
             tasks[task_id].updated_at = datetime.now(timezone.utc)
             
-            # Emit inference_started event and perform thinking gesture
+            # Emit inference_started event
             await emit_event(Event(
                 event=EventType.INFERENCE_STARTED,
                 task_id=task_id,
                 data={"backend": str(backend)},
             ))
-            await gesture_controller.thinking_gesture()
             
-            # Call backend for inference
+            # Start thinking gesture and backend inference in parallel for better performance
+            # The gesture will run while waiting for the backend response
+            import asyncio
+            
+            async def run_thinking_gesture():
+                """Run thinking gesture in background."""
+                print(f"🔵 About to perform THINKING gesture...", flush=True)
+                try:
+                    await gesture_controller.thinking_gesture()
+                    print(f"🔵✅ THINKING gesture completed", flush=True)
+                    logger.info("Thinking gesture completed")
+                except Exception as gesture_error:
+                    print(f"🔵❌ THINKING gesture failed: {str(gesture_error)}", flush=True)
+                    logger.error("Thinking gesture failed", error=str(gesture_error), error_type=type(gesture_error).__name__)
+                    import traceback
+                    logger.error("Thinking gesture traceback", traceback=traceback.format_exc())
+            
+            # Start thinking gesture as background task (don't await it)
+            thinking_task = asyncio.create_task(run_thinking_gesture())
+            
+            # Call backend for inference immediately (in parallel with gesture)
             aim_latency_ms = None
             response_content = ""
             
             try:
-                async with BackendClient(backend, base_url, api_key) as client:
+                print(f"🔵 About to call backend: backend={backend}, base_url={base_url}, model={task_request.input.get('model', 'default')}, prompt_length={len(prompt)}", flush=True)
+                async with BackendClient(backend, base_url, api_key, timeout=60) as client:  # Increased timeout to 60 seconds
                     # Use model from task input or default to Qwen3-32B (common AIM model)
                     model = task_request.input.get("model", "Qwen/Qwen3-32B")
                     
@@ -489,6 +583,7 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                         {"role": "user", "content": prompt}
                     ]
                     
+                    print(f"🔵 Calling backend chat_completion...", flush=True)
                     result = await client.chat_completion(
                         model=model,
                         messages=messages,
@@ -498,13 +593,28 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                     
                     response_content = result["content"]
                     aim_latency_ms = result["latency_ms"]
+                    print(f"🔵✅ Backend inference completed: response_length={len(response_content) if response_content else 0}, latency_ms={aim_latency_ms}", flush=True)
+                    
+                    # Wait for thinking gesture to complete if it's still running
+                    if not thinking_task.done():
+                        print(f"🔵 Waiting for thinking gesture to complete...", flush=True)
+                        try:
+                            await thinking_task
+                        except Exception as e:
+                            logger.warning("Thinking gesture task had error", error=str(e))
+                    else:
+                        print(f"🔵 Thinking gesture already completed", flush=True)
                     
             except Exception as e:
+                print(f"🔵❌ Backend inference failed: {str(e)}", flush=True)
+                import traceback
+                print(f"🔵❌ Backend inference traceback: {traceback.format_exc()}", flush=True)
                 logger.error(
                     "Backend inference failed",
                     task_id=task_id,
                     error=str(e),
-                    backend=str(backend)
+                    backend=str(backend),
+                    base_url=base_url
                 )
                 raise
             
@@ -516,8 +626,18 @@ async def execute_task(task_id: str, task_request: TaskRequest):
             ))
             
             # Perform done gesture
+            print(f"🔵 About to perform DONE gesture...", flush=True)
             logger.info("About to perform done gesture", driver_connected=reachy_driver.is_connected())
-            await gesture_controller.done_gesture()
+            try:
+                await gesture_controller.done_gesture()
+                print(f"🔵✅ DONE gesture completed", flush=True)
+                logger.info("Done gesture completed")
+            except Exception as gesture_error:
+                print(f"🔵❌ DONE gesture failed: {str(gesture_error)}", flush=True)
+                logger.error("Done gesture failed", error=str(gesture_error), error_type=type(gesture_error).__name__)
+                import traceback
+                logger.error("Done gesture traceback", traceback=traceback.format_exc())
+                # Continue execution even if gesture fails
             
             # Play audio response through robot's speaker (if enabled)
             # Check config file first, then environment variable
@@ -529,6 +649,7 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                 audio_enabled = config_audio_enabled
             
             # Log audio configuration for debugging
+            print(f"🔵 Audio check: audio_enabled={audio_enabled}, response_length={len(response_content) if response_content else 0}, driver_mocked={reachy_driver.mocked}, driver_connected={reachy_driver.is_connected()}", flush=True)
             logger.info(
                 "Audio check",
                 audio_enabled=audio_enabled,
@@ -539,13 +660,30 @@ async def execute_task(task_id: str, task_request: TaskRequest):
             )
             
             if audio_enabled and response_content:
+                print(f"🔵 Audio is enabled and response exists, entering audio section...", flush=True)
                 # Update audio controller with robot instance if available
                 robot_instance = None
                 if not reachy_driver.mocked:
-                    # Ensure driver is connected
+                    # Ensure driver is connected (use force=True to retry even if previous attempt failed)
                     if not reachy_driver.is_connected():
-                        # Try to connect
-                        await reachy_driver.connect()
+                        logger.info("Audio: Driver not connected, attempting connection...")
+                        try:
+                            # Wait for daemon/Zenoh to be ready if needed
+                            from app.daemon_manager import is_daemon_running, wait_for_zenoh_ready
+                            if is_daemon_running():
+                                loop = asyncio.get_event_loop()
+                                zenoh_ready = await loop.run_in_executor(None, wait_for_zenoh_ready, 5.0)
+                                if not zenoh_ready:
+                                    logger.warning("Audio: Zenoh not ready, but attempting connection anyway")
+                            
+                            # Use force=True to retry connection even if it failed before
+                            connected = await reachy_driver.connect(force=True)
+                            if connected and reachy_driver.is_connected():
+                                logger.info("Audio: Driver connected successfully")
+                            else:
+                                logger.warning("Audio: Driver connection failed, but audio may still work via PulseAudio", driver_connected=reachy_driver.is_connected())
+                        except Exception as e:
+                            logger.warning("Audio: Connection attempt failed, but audio may still work via PulseAudio", error=str(e))
                     
                     if reachy_driver.is_connected():
                         robot_instance = reachy_driver.get_robot()
@@ -556,20 +694,42 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                         else:
                             logger.warning("Audio: Robot instance is None")
                     else:
-                        logger.warning("Audio: Robot not connected, using mocked mode")
+                        # Driver not connected, but audio can still work via PulseAudio (ALSA direct)
+                        # Set robot to None but keep is_mocked = False so audio uses PulseAudio
+                        logger.info("Audio: Driver not connected, will use PulseAudio (ALSA direct) for audio playback")
+                        audio_controller.robot = None
+                        audio_controller.is_mocked = False  # Not mocked, just using PulseAudio instead of SDK
+                        # Ensure temp directory exists for audio generation
+                        if audio_controller._temp_dir is None:
+                            import tempfile
+                            audio_controller._temp_dir = tempfile.mkdtemp(prefix="reachy_audio_")
                 else:
                     logger.info("Audio: Hardware mocked, using mocked audio")
                 
                 # Speak the response
-                # Double-check robot is set before speaking
+                # Audio will work via PulseAudio even if robot is None (ALSA direct mode)
                 if audio_controller.robot and hasattr(audio_controller.robot, 'media'):
-                    logger.info("Audio: Robot and media available, speaking...", robot_type=type(audio_controller.robot).__name__)
+                    logger.info("Audio: Robot and media available, speaking via SDK...", robot_type=type(audio_controller.robot).__name__)
                 else:
-                    logger.warning("Audio: Robot or media not available before speak", robot_available=audio_controller.robot is not None, is_mocked=audio_controller.is_mocked)
+                    logger.info("Audio: Using PulseAudio (ALSA direct) for audio playback", robot_available=audio_controller.robot is not None, is_mocked=audio_controller.is_mocked)
                 
                 # Actually speak
-                speak_result = await audio_controller.speak(response_content)
-                logger.info("Audio: Speak completed", success=speak_result, text_length=len(response_content))
+                print(f"🔵 Audio: About to call speak() - is_mocked={audio_controller.is_mocked}, robot_available={audio_controller.robot is not None}, response_length={len(response_content)}", flush=True)
+                logger.info("Audio: About to call speak()", is_mocked=audio_controller.is_mocked, robot_available=audio_controller.robot is not None, response_length=len(response_content))
+                try:
+                    print(f"🔵 Calling audio_controller.speak()...", flush=True)
+                    speak_result = await audio_controller.speak(response_content)
+                    print(f"🔵✅ Audio speak completed: success={speak_result}", flush=True)
+                    logger.info("Audio: Speak completed", success=speak_result, text_length=len(response_content), is_mocked=audio_controller.is_mocked)
+                except Exception as audio_error:
+                    print(f"🔵❌ Audio speak failed: {str(audio_error)}", flush=True)
+                    logger.error("Audio speak failed", error=str(audio_error), error_type=type(audio_error).__name__)
+                    import traceback
+                    logger.error("Audio speak traceback", traceback=traceback.format_exc())
+                    # Continue execution even if audio fails
+            else:
+                print(f"🔵⚠️ Audio section skipped: audio_enabled={audio_enabled}, response_content={'exists' if response_content else 'None'}", flush=True)
+                logger.warning("Audio section skipped", audio_enabled=audio_enabled, has_response=response_content is not None and len(response_content) > 0)
             
             # Calculate end-to-end latency
             end_time = datetime.now(timezone.utc)
@@ -715,6 +875,8 @@ async def reload_config():
     """Reload configuration and update driver without full restart."""
     global reachy_driver, gesture_controller, audio_controller
     
+    print(f"🔴🔴🔴 reload_config() called", flush=True)
+    
     try:
         # Import daemon manager
         from app.daemon_manager import ensure_daemon_running, stop_daemon, wait_for_zenoh_ready
@@ -764,8 +926,10 @@ async def reload_config():
                 await reachy_driver.disconnect()
             
             # Create new driver with updated state
+            print(f"🔴 Creating new driver: mocked={new_mocked}", flush=True)
             reachy_driver = ReachyDriver(mocked=new_mocked)
             gesture_controller = GestureController(driver=reachy_driver if not reachy_driver.mocked else None)
+            print(f"🔴 Created gesture_controller: is_mocked={gesture_controller.is_mocked}, driver_available={gesture_controller.driver is not None}", flush=True)
             
             # Update audio controller robot reference
             if not new_mocked and reachy_driver.is_connected():
@@ -795,6 +959,34 @@ async def reload_config():
                             logger.info("Audio controller updated with robot instance", audio_mocked=audio_controller.is_mocked)
                         else:
                             logger.warning("Robot instance is None after successful connection")
+                        
+                        # Wait a moment for connection to stabilize before resetting
+                        import asyncio
+                        await asyncio.sleep(0.5)
+                        
+                        # Reset robot to rest position when hardware is enabled
+                        # This ensures the robot starts in a known good pose after being turned off
+                        print(f"🔵 About to reset robot to rest position...", flush=True)
+                        print(f"🔵 Robot instance: {robot_instance is not None}, gesture_mocked: {gesture_controller.is_mocked}, driver_connected: {reachy_driver.is_connected()}", flush=True)
+                        logger.info("Resetting robot to rest position after hardware enable...", robot_available=robot_instance is not None, gesture_mocked=gesture_controller.is_mocked, driver_connected=reachy_driver.is_connected())
+                        try:
+                            print(f"🔵 Calling return_to_rest()...", flush=True)
+                            await gesture_controller.return_to_rest()
+                            print(f"🔵✅ Robot reset to rest position completed", flush=True)
+                            logger.info("Robot reset to rest position completed")
+                        except Exception as reset_error:
+                            print(f"🔵❌ Failed to reset robot: {str(reset_error)}", flush=True)
+                            import traceback
+                            print(f"🔵❌ Reset traceback: {traceback.format_exc()}", flush=True)
+                            logger.warning(
+                                "Failed to reset robot to rest position",
+                                error=str(reset_error),
+                                error_type=type(reset_error).__name__,
+                                traceback=traceback.format_exc()
+                            )
+                            # Don't fail the reload if reset fails - robot might still be usable
+                        else:
+                            print(f"🔵 Reset completed without errors", flush=True)
                     else:
                         logger.info("Hardware enabled but connection not yet available - will retry on first use", driver_connected=reachy_driver.is_connected())
                 except Exception as e:
@@ -819,6 +1011,71 @@ async def reload_config():
     except Exception as e:
         logger.error("Failed to reload config", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/v1/agent/reset")
+async def reset_robot():
+    """Manually reset robot to rest position. Useful when robot is in a stale state."""
+    global reachy_driver, gesture_controller
+    
+    try:
+        print(f"🔴 Manual reset requested", flush=True)
+        
+        if reachy_driver.mocked:
+            return {
+                "success": False,
+                "message": "Robot is in mocked mode - no hardware to reset"
+            }
+        
+        # Try to connect if not connected
+        if not reachy_driver.is_connected():
+            print(f"🔴 Robot not connected, attempting connection...", flush=True)
+            from app.daemon_manager import is_daemon_running, wait_for_zenoh_ready
+            import asyncio
+            
+            if is_daemon_running():
+                loop = asyncio.get_event_loop()
+                zenoh_ready = await loop.run_in_executor(None, wait_for_zenoh_ready, 10.0)
+                if not zenoh_ready:
+                    return {
+                        "success": False,
+                        "message": "Zenoh service not ready - daemon may not be running"
+                    }
+            
+            connected = await reachy_driver.connect(force=True)
+            if not connected or not reachy_driver.is_connected():
+                return {
+                    "success": False,
+                    "message": "Failed to connect to robot. Check: 1) Robot is powered on, 2) USB connected (Lite) or on network (Wireless), 3) Reachy daemon is running"
+                }
+        
+        # Wait a moment for connection to stabilize
+        import asyncio
+        await asyncio.sleep(0.5)
+        
+        # Perform reset
+        print(f"🔴 Resetting robot to rest position...", flush=True)
+        try:
+            await gesture_controller.return_to_rest()
+            print(f"🔴✅ Robot reset completed", flush=True)
+            return {
+                "success": True,
+                "message": "Robot reset to rest position successfully"
+            }
+        except Exception as reset_error:
+            print(f"🔴❌ Reset failed: {str(reset_error)}", flush=True)
+            import traceback
+            logger.error("Manual reset failed", error=str(reset_error), traceback=traceback.format_exc())
+            return {
+                "success": False,
+                "message": f"Reset failed: {str(reset_error)}"
+            }
+            
+    except Exception as e:
+        logger.error("Failed to reset robot", error=str(e))
+        return {
+            "success": False,
+            "message": f"Reset request failed: {str(e)}"
+        }
 
 # App is already imported from common framework
 # We override specific routes below

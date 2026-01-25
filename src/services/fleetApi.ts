@@ -269,12 +269,58 @@ class FleetApiService {
           status = 'DEGRADED';
         }
 
+        // Detect actual backend from settings (LM Studio, AIM, etc.)
+        // Check localStorage for the configured backend
+        let detectedBackend = info.backend_default.toUpperCase();
+        try {
+          const settingsStr = localStorage.getItem('multiverse-settings');
+          if (settingsStr) {
+            const settings = JSON.parse(settingsStr);
+            const selectedModel = settings.selectedModel || '';
+            const customEndpoint = settings.customEndpoint || '';
+            
+            // Determine backend based on selected model and endpoint
+            // Check model name first (most reliable)
+            if (selectedModel.includes('LM Studio')) {
+              detectedBackend = 'LOCAL';
+            } else if (selectedModel.includes('AIM')) {
+              detectedBackend = 'AIM';
+            } else if (selectedModel.includes('Ollama')) {
+              detectedBackend = 'LOCAL';
+            } else if (selectedModel.includes('Custom')) {
+              // For custom endpoints, detect from URL port or pattern
+              // LM Studio typically uses port 1234 (any IP)
+              if (customEndpoint.includes(':1234') || customEndpoint.match(/:\d+$/)?.[0] === ':1234') {
+                detectedBackend = 'LOCAL';
+              } else if (customEndpoint.includes(':8000') || customEndpoint.includes('localhost:8000')) {
+                detectedBackend = 'AIM';
+              } else if (customEndpoint.includes(':11434')) {
+                // Ollama default port
+                detectedBackend = 'LOCAL';
+              }
+            } else {
+              // Fallback: detect from endpoint URL if model name doesn't match
+              // LM Studio uses port 1234 (works with any IP: 192.168.x.x:1234, localhost:1234, etc.)
+              if (customEndpoint.includes(':1234')) {
+                detectedBackend = 'LOCAL';
+              } else if (customEndpoint.includes(':8000')) {
+                detectedBackend = 'AIM';
+              } else if (customEndpoint.includes(':11434')) {
+                detectedBackend = 'LOCAL';
+              }
+            }
+          }
+        } catch (e) {
+          // If we can't read settings, use the default from agent info
+          console.warn('Could not detect backend from settings, using default:', e);
+        }
+
         robots.push({
           id: agent.id,
           name: agent.name,
           type: agent.type,
           status,
-          backend: info.backend_default.toUpperCase(),
+          backend: detectedBackend,
           capabilities: info.capabilities,
           url: agent.url,
           health: health || undefined,
