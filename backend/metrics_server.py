@@ -10,6 +10,7 @@ import logging
 import platform
 import re
 import subprocess
+from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
 
@@ -29,6 +30,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Multiverse Metrics Service")
+
+ROOT_DIR = Path("/home/yw/Desktop/Multiverse")
+SCRIPTS_DIR = ROOT_DIR / "scripts"
+START_ALL_SCRIPT = SCRIPTS_DIR / "start-all.sh"
+STOP_ALL_SCRIPT = SCRIPTS_DIR / "stop-all.sh"
 
 # CORS middleware
 app.add_middleware(
@@ -463,6 +469,34 @@ async def health_check():
         "gpu_support": "NVIDIA" if collector.nvidia_available else ("AMD/ROCm" if collector.rocm_available else "None"),
         "platform": platform.system()
     }
+
+
+def _run_script(script_path: Path) -> Dict:
+    if not script_path.exists():
+        return {"ok": False, "error": f"Script not found: {script_path}"}
+    try:
+        subprocess.Popen(
+            ["/bin/bash", str(script_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return {"ok": True, "script": str(script_path)}
+    except Exception as exc:
+        logger.error("Failed to run script %s: %s", script_path, exc)
+        return {"ok": False, "error": str(exc)}
+
+
+@app.post("/api/agents/start-all")
+async def start_all_agents():
+    """Start all agents using the bundled script."""
+    return _run_script(START_ALL_SCRIPT)
+
+
+@app.post("/api/agents/stop-all")
+async def stop_all_agents():
+    """Stop all agents using the bundled script."""
+    return _run_script(STOP_ALL_SCRIPT)
 
 
 if __name__ == "__main__":

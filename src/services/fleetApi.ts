@@ -102,8 +102,9 @@ class FleetApiService {
   /**
    * Get agent health status
    */
-  async getAgentHealth(agentUrl: string = this.defaultAgentUrl): Promise<HealthStatus> {
-    const response = await fetch(`${agentUrl}/v1/agent/health`);
+  async getAgentHealth(agentUrl: string = this.defaultAgentUrl, role?: string): Promise<HealthStatus> {
+    const query = role ? `?role=${encodeURIComponent(role)}` : '';
+    const response = await fetch(`${agentUrl}/v1/agent/health${query}`);
     if (!response.ok) {
       throw new Error(`Failed to get agent health: ${response.statusText}`);
     }
@@ -209,7 +210,9 @@ class FleetApiService {
     // For now, we'll use a configuration or discover agents
     const configuredAgents: Array<{ id: string; name: string; type: string; url: string }> = [
       { id: 'reachy-001', name: 'Reachy Mini', type: 'Social Robot', url: 'http://localhost:9001' },
-      // Add more agents as they're configured
+      { id: 'so101-follower', name: 'SO-101 Follower', type: 'Actuation Arm', url: 'http://localhost:9101' },
+      { id: 'so101-camera', name: 'SO-101 Camera', type: 'Sensor', url: 'http://localhost:9101' },
+      { id: 'so101-leader', name: 'SO-101 Leader', type: 'Control Surface', url: 'http://localhost:9101' },
     ];
 
     const robots: Robot[] = [];
@@ -218,7 +221,7 @@ class FleetApiService {
       try {
         const [info, health, config] = await Promise.all([
           this.getAgentInfo(agent.url),
-          this.getAgentHealth(agent.url).catch((err) => {
+          this.getAgentHealth(agent.url, agent.id.startsWith('so101-') ? agent.id.replace('so101-', '') : undefined).catch((err) => {
             console.warn(`[Fleet API] Failed to get health for ${agent.url}:`, err);
             return null;
           }),
@@ -235,8 +238,12 @@ class FleetApiService {
         if (health) {
           // Normalize status to lowercase for comparison (API returns lowercase strings)
           const healthStatus = String(health.status || '').toLowerCase();
-          const sensorsOk = Boolean(health.sensors_ok);
-          const actuatorsOk = Boolean(health.actuators_ok);
+          const sensorsRaw = health.sensors_ok;
+          const actuatorsRaw = health.actuators_ok;
+          const sensorsApplicable = sensorsRaw !== null && sensorsRaw !== undefined;
+          const actuatorsApplicable = actuatorsRaw !== null && actuatorsRaw !== undefined;
+          const sensorsOk = sensorsApplicable ? Boolean(sensorsRaw) : true;
+          const actuatorsOk = actuatorsApplicable ? Boolean(actuatorsRaw) : true;
           
           if (healthStatus === 'online') {
             // Check hardware mode for Reachy agent
@@ -253,9 +260,12 @@ class FleetApiService {
               }
             } else if (sensorsOk && actuatorsOk) {
               status = 'READY';
-            } else {
-              // Online but sensors/actuators not fully OK
+            } else if ((sensorsApplicable && !sensorsOk) || (actuatorsApplicable && !actuatorsOk)) {
+              // Online but applicable checks failed
               status = 'DEGRADED';
+            } else {
+              // Online with non-applicable checks (leader/camera)
+              status = 'READY';
             }
           } else if (healthStatus === 'degraded') {
             status = 'DEGRADED';

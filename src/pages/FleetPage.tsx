@@ -10,10 +10,17 @@ interface StatusCheckModalProps {
   robot: Robot;
   isOpen: boolean;
   onClose: () => void;
-  onRefresh: () => void;
 }
 
-const StatusCheckModal: React.FC<StatusCheckModalProps> = ({ robot, isOpen, onClose, onRefresh }) => {
+const getRoleLabel = (robotId: string) => {
+  if (robotId === 'so101-leader') return 'CONTROL SURFACE';
+  if (robotId === 'so101-camera') return 'SENSOR';
+  if (robotId === 'so101-follower') return 'ACTUATION';
+  if (robotId === 'reachy-001') return 'SOCIAL ROBOT';
+  return 'ENDPOINT';
+};
+
+const StatusCheckModal: React.FC<StatusCheckModalProps> = ({ robot, isOpen, onClose }) => {
   const [checking, setChecking] = useState(false);
   const [health, setHealth] = useState<Robot['health']>(robot.health);
   const [config, setConfig] = useState<any>(null);
@@ -29,13 +36,13 @@ const StatusCheckModal: React.FC<StatusCheckModalProps> = ({ robot, isOpen, onCl
     setChecking(true);
     try {
       const [healthData, configData] = await Promise.all([
-        fleetApi.getAgentHealth(robot.url).catch(() => null),
+        fleetApi.getAgentHealth(robot.url, robot.id.startsWith('so101-') ? robot.id.replace('so101-', '') : undefined).catch(() => null),
         robot.id === 'reachy-001' 
           ? fleetApi.getAgentConfig(robot.url).catch(() => null)
           : Promise.resolve(null),
       ]);
       
-      setHealth(healthData);
+      setHealth(healthData ?? undefined);
       setConfig(configData);
       
       if (healthData) {
@@ -80,14 +87,22 @@ const StatusCheckModal: React.FC<StatusCheckModalProps> = ({ robot, isOpen, onCl
                   </div>
                   <div className="status-item">
                     <span className="status-label">Sensors</span>
-                    <span className={`status-value ${health?.sensors_ok ? 'status-ok' : 'status-error'}`}>
-                      {health?.sensors_ok ? '✓ OK' : '✗ FAILED'}
+                    <span
+                      className={`status-value ${
+                        health?.sensors_ok === undefined ? 'status-na' : (health?.sensors_ok ? 'status-ok' : 'status-error')
+                      }`}
+                    >
+                      {health?.sensors_ok === undefined ? 'N/A' : health?.sensors_ok ? '✓ OK' : '✗ FAILED'}
                     </span>
                   </div>
                   <div className="status-item">
                     <span className="status-label">Actuators</span>
-                    <span className={`status-value ${health?.actuators_ok ? 'status-ok' : 'status-error'}`}>
-                      {health?.actuators_ok ? '✓ OK' : '✗ FAILED'}
+                    <span
+                      className={`status-value ${
+                        health?.actuators_ok === undefined ? 'status-na' : (health?.actuators_ok ? 'status-ok' : 'status-error')
+                      }`}
+                    >
+                      {health?.actuators_ok === undefined ? 'N/A' : health?.actuators_ok ? '✓ OK' : '✗ FAILED'}
                     </span>
                   </div>
                   {health?.uptime_seconds !== undefined && (
@@ -141,6 +156,66 @@ const StatusCheckModal: React.FC<StatusCheckModalProps> = ({ robot, isOpen, onCl
                 </div>
               )}
 
+              {robot.id.startsWith('so101-') && health?.checks && (
+                <div className="status-section">
+                  <h3>Device Paths</h3>
+                  <div className="status-grid">
+                    <div className="status-item">
+                      <span className="status-label">Follower Port</span>
+                      <span
+                        className={`status-value ${health.checks.follower_port_ok ? 'status-ok' : 'status-error'}`}
+                      >
+                        {health.checks.follower_port_ok ? '✓ OK' : '✗ MISSING'}
+                      </span>
+                      {!health.checks.follower_port_ok && (
+                        <span className="status-hint">
+                          Replug follower USB or reload udev.
+                        </span>
+                      )}
+                    </div>
+                    <div className="status-item">
+                      <span className="status-label">Leader Port</span>
+                      <span
+                        className={`status-value ${health.checks.leader_port_ok ? 'status-ok' : 'status-error'}`}
+                      >
+                        {health.checks.leader_port_ok ? '✓ OK' : '✗ MISSING'}
+                      </span>
+                      {!health.checks.leader_port_ok && (
+                        <span className="status-hint">
+                          Replug leader USB or reload udev.
+                        </span>
+                      )}
+                    </div>
+                    <div className="status-item">
+                      <span className="status-label">Camera</span>
+                      <span
+                        className={`status-value ${health.checks.camera_ok ? 'status-ok' : 'status-error'}`}
+                      >
+                        {health.checks.camera_ok ? '✓ OK' : '✗ MISSING'}
+                      </span>
+                      {!health.checks.camera_ok && (
+                        <span className="status-hint">
+                          Replug camera or check /dev/robot_cam.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {health?.paths && (
+                    <div className="status-paths">
+                      <div>
+                        <span>Follower:</span> {health.paths.follower_port || 'unset'}
+                      </div>
+                      <div>
+                        <span>Leader:</span> {health.paths.leader_port || 'unset'}
+                      </div>
+                      <div>
+                        <span>Camera:</span> {health.paths.camera_device || 'unset'}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="status-section">
                 <h3>Robot Information</h3>
                 <div className="status-grid">
@@ -151,6 +226,10 @@ const StatusCheckModal: React.FC<StatusCheckModalProps> = ({ robot, isOpen, onCl
                   <div className="status-item">
                     <span className="status-label">Type</span>
                     <span className="status-value">{robot.type}</span>
+                  </div>
+                  <div className="status-item">
+                    <span className="status-label">Role</span>
+                    <span className="status-value">{getRoleLabel(robot.id)}</span>
                   </div>
                   <div className="status-item">
                     <span className="status-label">Backend</span>
@@ -187,6 +266,54 @@ export const FleetPage: React.FC = () => {
   const [loadingConfig, setLoadingConfig] = useState<Record<string, boolean>>({});
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [selectedRobot, setSelectedRobot] = useState<Robot | null>(null);
+  const [agentCommandRunning, setAgentCommandRunning] = useState<'start' | 'stop' | null>(null);
+  const [backendOnline, setBackendOnline] = useState(true);
+
+  const runAgentCommand = async (action: 'start' | 'stop') => {
+    setAgentCommandRunning(action);
+    try {
+      const response = await fetch(`http://localhost:8000/api/agents/${action}-all`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to ${action} agents`);
+      }
+      const payload = await response.json();
+      if (!payload.ok) {
+        throw new Error(payload.error || `Failed to ${action} agents`);
+      }
+      showToast(`Agents ${action === 'start' ? 'starting' : 'stopping'}...`, 'success');
+      refetch();
+      setTimeout(() => {
+        refetch();
+      }, 2000);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : `Failed to ${action} agents`;
+      showToast(message, 'error');
+    } finally {
+      setAgentCommandRunning(null);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    const checkBackend = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/health');
+        if (!active) return;
+        setBackendOnline(response.ok);
+      } catch {
+        if (!active) return;
+        setBackendOnline(false);
+      }
+    };
+    checkBackend();
+    const interval = setInterval(checkBackend, 8000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const getStatusColor = (status: Robot['status']) => {
     switch (status) {
@@ -206,6 +333,7 @@ export const FleetPage: React.FC = () => {
         return '#6b7280'; // gray
     }
   };
+
 
   const handleRunTask = (robotId: string) => {
     navigate(`/tasks?robot=${robotId}`);
@@ -241,6 +369,7 @@ export const FleetPage: React.FC = () => {
       loadConfig();
     }
   }, [robots]);
+
 
   const handleToggleHardware = async (robotId: string, robotUrl: string) => {
     // Prevent multiple simultaneous toggles
@@ -287,6 +416,7 @@ export const FleetPage: React.FC = () => {
     }
   };
 
+
   if (loading) {
     return (
       <div className="fleet-page">
@@ -315,24 +445,45 @@ export const FleetPage: React.FC = () => {
     },
     {} as Record<string, number>
   );
+  const agentsRunning = robots.some(
+    (robot) => robot.status === 'READY' || robot.status === 'DEGRADED'
+  );
 
   return (
     <div className="fleet-page">
       <div className="fleet-header">
         <h1 className="fleet-title">Fleet</h1>
-        <div className="fleet-health">
-          <span className="health-item">
-            <span className="health-dot" style={{ color: '#22c55e' }}>●</span>
-            {statusCounts.READY || 0} online
-          </span>
-          <span className="health-item">
-            <span className="health-dot" style={{ color: '#f59e0b' }}>●</span>
-            {statusCounts.DEGRADED || 0} degraded
-          </span>
-          <span className="health-item">
-            <span className="health-dot" style={{ color: '#ef4444' }}>●</span>
-            {statusCounts.OFFLINE || 0} offline
-          </span>
+        <div className="fleet-header-actions">
+          <button
+            className={`btn ${agentsRunning ? 'btn-danger' : 'btn-primary'}`}
+            onClick={() => runAgentCommand(agentsRunning ? 'stop' : 'start')}
+            disabled={agentCommandRunning !== null || !backendOnline}
+          >
+            {agentCommandRunning === 'start'
+              ? 'Starting...'
+              : agentCommandRunning === 'stop'
+              ? 'Stopping...'
+              : agentsRunning
+              ? 'Stop Agents'
+              : 'Start Agents'}
+          </button>
+          {!backendOnline && (
+            <span className="fleet-backend-warning">Backend offline</span>
+          )}
+          <div className="fleet-health">
+            <span className="health-item">
+              <span className="health-dot" style={{ color: '#22c55e' }}>●</span>
+              {statusCounts.READY || 0} online
+            </span>
+            <span className="health-item">
+              <span className="health-dot" style={{ color: '#f59e0b' }}>●</span>
+              {statusCounts.DEGRADED || 0} degraded
+            </span>
+            <span className="health-item">
+              <span className="health-dot" style={{ color: '#ef4444' }}>●</span>
+              {statusCounts.OFFLINE || 0} offline
+            </span>
+          </div>
         </div>
       </div>
 
@@ -355,7 +506,7 @@ export const FleetPage: React.FC = () => {
               <div className="robot-card-header">
                 <div className="robot-card-title">
                   <h3>{robot.name}</h3>
-                  <span className="robot-type">{robot.type}</span>
+                  <span className="robot-role">{getRoleLabel(robot.id)}</span>
                 </div>
                 <div
                   className="robot-status"
@@ -421,13 +572,15 @@ export const FleetPage: React.FC = () => {
                 >
                   Status
                 </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => handleRunTask(robot.id)}
-                  type="button"
-                >
-                  Run Task
-                </button>
+                {robot.id !== 'so101-leader' && (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => handleRunTask(robot.id)}
+                    type="button"
+                  >
+                    Run Task
+                  </button>
+                )}
                 <button
                   className="btn btn-secondary"
                   onClick={() => handleView(robot.id)}
@@ -449,9 +602,9 @@ export const FleetPage: React.FC = () => {
             setStatusModalOpen(false);
             setSelectedRobot(null);
           }}
-          onRefresh={refetch}
         />
       )}
+
     </div>
   );
 };

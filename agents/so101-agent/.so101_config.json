@@ -1,0 +1,37 @@
+{
+  "follower": {
+    "id": "follower_arm",
+    "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE6082421-if00",
+    "calibration_dir": "/home/yw/.cache/huggingface/lerobot/calibration",
+    "dataset_root": "/home/yw/Desktop/Multiverse/assets/motions/so101_home_poseA_home_v1",
+    "dataset_repo_id": "local/so101_home_poseA_home_v1",
+    "dataset_episode": 0,
+    "dataset_fps": 15,
+    "play_sounds": false
+  },
+  "leader": {
+    "id": "leader_arm",
+    "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE6084391-if00",
+    "enabled": true
+  },
+  "camera": {
+    "device": "/dev/robot_cam",
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "fourcc": "MJPG"
+  },
+  "teleop": {
+    "display_data": true,
+    "enabled": true
+  },
+  "lerobot": {
+    "cli_timeout_sec": 20,
+    "src_path": "/home/yw/lerobot/src",
+    "replay_path": "/home/yw/miniconda3/envs/lerobot/bin/lerobot-replay"
+  },
+  "system": {
+    "udev_reload_on_start": false
+  }
+}
+

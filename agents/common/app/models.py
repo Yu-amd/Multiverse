@@ -88,8 +88,8 @@ class HealthStatus(BaseModel):
     """Agent health status."""
     status: AgentStatus = Field(..., description="Current health status")
     last_seen: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Last health check timestamp")
-    sensors_ok: bool = Field(True, description="Whether sensors are operational")
-    actuators_ok: bool = Field(True, description="Whether actuators are operational")
+    sensors_ok: Optional[bool] = Field(None, description="Whether sensors are operational")
+    actuators_ok: Optional[bool] = Field(None, description="Whether actuators are operational")
     backend_available: Optional[bool] = Field(None, description="Whether backend is available")
     uptime_seconds: Optional[float] = Field(None, description="Agent uptime in seconds")
 

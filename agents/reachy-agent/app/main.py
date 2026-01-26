@@ -281,11 +281,11 @@ else:
 async def get_agent_health():
     """Get Reachy agent health status."""
     # Check driver connection
-    driver_ok = reachy_driver.is_connected() or reachy_driver.mocked
+    driver_ok = reachy_driver.is_connected()
     safety_ok = reachy_driver.check_safety()
     
     return HealthStatus(
-        status=AgentStatus.ONLINE if (driver_ok and safety_ok) else AgentStatus.DEGRADED,
+        status=AgentStatus.ONLINE if (safety_ok and (driver_ok or reachy_driver.mocked)) else AgentStatus.DEGRADED,
         last_seen=datetime.now(timezone.utc),
         sensors_ok=driver_ok,
         actuators_ok=driver_ok,

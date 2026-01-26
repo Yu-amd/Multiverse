@@ -75,8 +75,63 @@ uvicorn app.main:app --host 0.0.0.0 --port 9002
 ### Run SO-101 Agent
 ```bash
 cd agents/so101-agent
-uvicorn app.main:app --host 0.0.0.0 --port 9003
+./start.sh
 ```
+
+### SO-101: Record + Replay (fixed device paths)
+**Fixed paths**
+- Follower: `/dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE6082421-if00`
+- Leader: `/dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE6084391-if00`
+- Camera: `/dev/robot_cam`
+- Calibration base: `~/.cache/huggingface/lerobot/calibration`
+
+**Set calibration env var (required)**
+```bash
+export HF_LEROBOT_CALIBRATION="$HOME/.cache/huggingface/lerobot/calibration"
+```
+
+**Clean previous dataset**
+```bash
+rm -rf "$HOME/Desktop/Multiverse/assets/motions/so101_home_poseA_home_v1"
+```
+
+**Record (20s window)**
+```bash
+DATASET_ROOT="$HOME/Desktop/Multiverse/assets/motions/so101_home_poseA_home_v1"
+
+lerobot-record \
+  --robot.type=so101_follower --robot.id=follower_arm \
+  --robot.port=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE6082421-if00 \
+  --teleop.type=so101_leader --teleop.id=leader_arm \
+  --teleop.port=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE6084391-if00 \
+  --dataset.root="$DATASET_ROOT" \
+  --dataset.fps=30 \
+  --dataset.episode_time_s=20 \
+  --dataset.reset_time_s=1 \
+  --dataset.num_episodes=1 \
+  --dataset.video=false \
+  --dataset.repo_id="local/so101_home_poseA_home_v1" \
+  --dataset.single_task=true \
+  --dataset.push_to_hub=false \
+  --robot.cameras='{"teleop":{"type":"opencv","index_or_path":"/dev/robot_cam","width":1920,"height":1080,"fps":30,"fourcc":"MJPG"}}'
+```
+
+**Replay (stable at 15 FPS)**
+```bash
+DATASET_ROOT="$HOME/Desktop/Multiverse/assets/motions/so101_home_poseA_home_v1"
+
+lerobot-replay \
+  --robot.type=so101_follower --robot.id=follower_arm \
+  --robot.port=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE6082421-if00 \
+  --dataset.root="$DATASET_ROOT" \
+  --dataset.repo_id="local/so101_home_poseA_home_v1" \
+  --dataset.episode=0 \
+  --dataset.fps=15 \
+  --play_sounds=false
+```
+
+**Replay from UI**
+- Open **Tasks** page → **SO-101 Replay Task** → **Run Replay Task**
 
 ### Test Agent API
 ```bash
