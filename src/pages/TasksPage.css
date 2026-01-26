@@ -28,6 +28,42 @@
   max-width: calc(100vw - 200px - 4rem); /* Account for nav (200px) + padding (2rem each side) */
 }
 
+.tasks-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.tasks-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.tasks-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.tasks-section-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.tasks-section-header span {
+  color: var(--text-secondary, #a0a0a0);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .tasks-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

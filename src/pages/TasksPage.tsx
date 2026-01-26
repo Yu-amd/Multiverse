@@ -223,49 +223,65 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
   return (
     <div className="tasks-page">
       <div className="tasks-page-content">
-        <div className="tasks-tiles">
-          <button
-            className={`task-tile ${selectedTask === 'chat' ? 'active' : ''} ${chatRunning ? 'running' : ''}`}
-            onClick={() => {
-              setSelectedTask('chat');
-              setShowChatTask(true);
-            }}
-            type="button"
-          >
-            <div>
-              <h2>Chat Task</h2>
-              <p>Run natural language tasks against the active backend.</p>
+        <div className="tasks-sections">
+          <section className="tasks-section">
+            <div className="tasks-section-header">
+              <h2>Assistant</h2>
+              <span>1 task</span>
             </div>
-            <span className="task-tile-cta">Open Chat</span>
-          </button>
-          <button
-            className={`task-tile ${selectedTask === 'so101' ? 'active' : ''} ${so101Running ? 'running' : ''}`}
-            onClick={() => {
-              setSelectedTask('so101');
-              setShowChatTask(false);
-            }}
-            type="button"
-          >
-            <div>
-              <h2>SO-101 Replay Task</h2>
-              <p>Deterministic follower motion using recorded replay.</p>
+            <div className="tasks-tiles">
+              <button
+                className={`task-tile ${selectedTask === 'chat' ? 'active' : ''} ${chatRunning ? 'running' : ''}`}
+                onClick={() => {
+                  setSelectedTask('chat');
+                  setShowChatTask(true);
+                }}
+                type="button"
+              >
+                <div>
+                  <h2>Chat Task</h2>
+                  <p>Run natural language tasks against the active backend.</p>
+                </div>
+                <span className="task-tile-cta">Open Chat</span>
+              </button>
             </div>
-            <span className="task-tile-cta">Review & Run</span>
-          </button>
-          <button
-            className={`task-tile ${selectedTask === 'so101-camera' ? 'active' : ''} ${cameraRunning ? 'running' : ''}`}
-            onClick={() => {
-              setSelectedTask('so101-camera');
-              setShowChatTask(false);
-            }}
-            type="button"
-          >
-            <div>
-              <h2>SO-101 Camera Task</h2>
-              <p>Capture a snapshot or start a bounded stream session.</p>
+          </section>
+          <section className="tasks-section">
+            <div className="tasks-section-header">
+              <h2>SO-101</h2>
+              <span>2 tasks</span>
             </div>
-            <span className="task-tile-cta">Review & Run</span>
-          </button>
+            <div className="tasks-tiles">
+              <button
+                className={`task-tile ${selectedTask === 'so101' ? 'active' : ''} ${so101Running ? 'running' : ''}`}
+                onClick={() => {
+                  setSelectedTask('so101');
+                  setShowChatTask(false);
+                }}
+                type="button"
+              >
+                <div>
+                  <h2>SO-101 Replay Task</h2>
+                  <p>Deterministic follower motion using recorded replay.</p>
+                </div>
+                <span className="task-tile-cta">Review & Run</span>
+              </button>
+              <button
+                className={`task-tile ${selectedTask === 'so101-camera' ? 'active' : ''} ${cameraRunning ? 'running' : ''}`}
+                onClick={() => {
+                  setSelectedTask('so101-camera');
+                  setShowChatTask(false);
+                }}
+                type="button"
+              >
+                <div>
+                  <h2>SO-101 Camera Task</h2>
+                  <p>Capture a snapshot or start a bounded stream session.</p>
+                </div>
+                <span className="task-tile-cta">Review & Run</span>
+              </button>
+            </div>
+          </section>
         </div>
 
         {selectedTask && selectedTask !== 'chat' && (
