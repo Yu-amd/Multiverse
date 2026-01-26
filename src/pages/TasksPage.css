@@ -205,6 +205,28 @@
   color: var(--text-primary, #ffffff);
 }
 
+.so101-camera-preview {
+  margin: 0.75rem 0 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.6);
+  padding: 0.5rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 220px;
+}
+
+.so101-camera-preview img {
+  max-width: 100%;
+  border-radius: 10px;
+}
+
+.so101-camera-preview-placeholder {
+  color: var(--text-secondary, #a0a0a0);
+  font-size: 0.85rem;
+}
+
 .so101-task-health {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

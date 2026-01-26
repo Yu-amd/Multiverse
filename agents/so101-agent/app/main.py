@@ -79,6 +79,8 @@ AgentInfo = common_models.AgentInfo
 HealthStatus = common_models.HealthStatus
 AgentStatus = common_models.AgentStatus
 BackendType = common_models.BackendType
+TaskStatus = common_models.TaskStatus
+TaskState = common_models.TaskState
 
 common_settings = common_settings_module.settings
 StructuredLogger = common_observability.StructuredLogger
@@ -103,6 +105,17 @@ app.add_middleware(
 route_index_to_remove = None
 for i, route in enumerate(app.routes):
     if hasattr(route, 'path') and route.path == "/v1/agent/info":
+        if hasattr(route, 'methods') and "GET" in route.methods:
+            route_index_to_remove = i
+            break
+
+if route_index_to_remove is not None:
+    app.routes.pop(route_index_to_remove)
+
+# Remove common /v1/runs route and replace
+route_index_to_remove = None
+for i, route in enumerate(app.routes):
+    if hasattr(route, 'path') and route.path == "/v1/runs":
         if hasattr(route, 'methods') and "GET" in route.methods:
             route_index_to_remove = i
             break
@@ -151,7 +164,18 @@ from .lerobot_cli import (
     stop_pose_sequence,
     sequence_status,
 )
-from .camera import capture_frame
+from fastapi.responses import StreamingResponse
+from .camera import (
+    capture_frame,
+    start_stream,
+    stop_stream,
+    get_stream_status,
+    get_latest_frame_base64,
+    stream_mjpeg,
+)
+from .run_history import record_run, list_runs as list_so101_runs
+
+_current_camera_stream_run_id: str | None = None
 
 
 @app.get("/v1/agent/health", response_model=HealthStatus)
@@ -171,10 +195,20 @@ async def get_agent_health_so101(role: str | None = None):
     )
 
 
+@app.get("/v1/runs", response_model=list[TaskStatus])
+async def list_runs(limit: int = 100):
+    combined = list(tasks.values()) + list_so101_runs(limit=limit)
+    combined.sort(key=lambda item: item.created_at, reverse=True)
+    return combined[: max(1, min(limit, 500))]
+
+
 @app.post("/v1/so101/teleop/start")
 async def teleop_start():
     try:
         result = start_teleop()
+        run_id = result.get("run_id")
+        if run_id:
+            record_run(run_id, TaskState.RUNNING, "so101_teleop")
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -184,6 +218,13 @@ async def teleop_start():
 async def teleop_stop(run_id: str):
     try:
         result = stop_teleop(run_id)
+        record_run(
+            run_id,
+            TaskState.COMPLETED if result.get("ok") == "true" else TaskState.FAILED,
+            "so101_teleop",
+            result={"content": "so101_teleop", **result},
+            error=None if result.get("ok") == "true" else result.get("message"),
+        )
         return {"success": result.get("ok") == "true", **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -198,17 +239,121 @@ async def teleop_get_status(run_id: str | None = None):
 
 
 @app.post("/v1/so101/camera/capture")
-async def camera_capture(run_id: str | None = None):
+async def camera_capture(
+    run_id: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    format: str = "jpg",
+    warmup_frames: int = 3,
+):
     run_id = run_id or str(uuid.uuid4())
     try:
-        result = capture_frame(run_id)
+        result = capture_frame(
+            run_id,
+            width=width,
+            height=height,
+            image_format=format,
+            warmup_frames=warmup_frames,
+        )
         if not result.get("ok"):
             raise HTTPException(status_code=500, detail=result.get("error", "capture failed"))
+        record_run(
+            run_id,
+            TaskState.COMPLETED,
+            "so101_camera_capture",
+            result={"content": "so101_camera_capture", **result},
+        )
         return {"success": True, "run_id": run_id, **result}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/so101/camera/start")
+async def camera_start(
+    fps: int | None = None,
+    duration_s: int = 15,
+    width: int | None = None,
+    height: int | None = None,
+):
+    try:
+        global _current_camera_stream_run_id
+        _current_camera_stream_run_id = str(uuid.uuid4())
+        result = start_stream(fps, duration_s=duration_s, width=width, height=height)
+        if not result.get("ok"):
+            raise HTTPException(status_code=500, detail=result.get("error", "start failed"))
+        record_run(
+            _current_camera_stream_run_id,
+            TaskState.RUNNING,
+            "so101_camera_stream",
+            result={"content": "so101_camera_stream", "duration_s": duration_s},
+        )
+        cfg = get_config().get("camera", {})
+        resolved_fps = fps or int(cfg.get("fps", 15))
+        resolved_width = width or int(cfg.get("width", 1280))
+        resolved_height = height or int(cfg.get("height", 720))
+        stream_url = (
+            f"/v1/so101/camera/stream.mjpg?duration_s={duration_s}"
+            f"&fps={resolved_fps}&width={resolved_width}&height={resolved_height}"
+        )
+        return {"success": True, "stream_url": stream_url, "run_id": _current_camera_stream_run_id, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/so101/camera/stop")
+async def camera_stop():
+    try:
+        global _current_camera_stream_run_id
+        result = stop_stream()
+        if _current_camera_stream_run_id:
+            record_run(
+                _current_camera_stream_run_id,
+                TaskState.COMPLETED,
+                "so101_camera_stream",
+                result={"content": "so101_camera_stream", **result},
+            )
+            _current_camera_stream_run_id = None
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/so101/camera/status")
+async def camera_status():
+    try:
+        return get_stream_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/so101/camera/frame")
+async def camera_frame():
+    try:
+        result = get_latest_frame_base64()
+        if not result.get("ok"):
+            raise HTTPException(status_code=404, detail=result.get("error", "no frame"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/so101/camera/stream.mjpg")
+async def camera_stream_mjpeg(
+    duration_s: int = 15,
+    fps: int = 15,
+    width: int | None = None,
+    height: int | None = None,
+):
+    return StreamingResponse(
+        stream_mjpeg(duration_s=duration_s, fps=fps, width=width, height=height),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @app.post("/v1/so101/follower/sequence/start")
@@ -222,6 +367,14 @@ async def follower_sequence_start():
                 detail=f"Follower port not available at {port_path}. Replug device or reload udev."
             )
         result = start_pose_sequence()
+        run_id = result.get("run_id")
+        if run_id:
+            record_run(
+                run_id,
+                TaskState.RUNNING,
+                "so101_follower_sequence",
+                result={"content": "so101_follower_sequence", **result},
+            )
         return {"success": True, **result}
     except HTTPException:
         raise
@@ -233,6 +386,13 @@ async def follower_sequence_start():
 async def follower_sequence_stop(run_id: str):
     try:
         result = stop_pose_sequence(run_id)
+        record_run(
+            run_id,
+            TaskState.COMPLETED if result.get("ok") == "true" else TaskState.FAILED,
+            "so101_follower_sequence",
+            result={"content": "so101_follower_sequence", **result},
+            error=None if result.get("ok") == "true" else result.get("message"),
+        )
         return {"success": result.get("ok") == "true", **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -241,7 +401,16 @@ async def follower_sequence_stop(run_id: str):
 @app.get("/v1/so101/follower/sequence/status")
 async def follower_sequence_status(run_id: str | None = None):
     try:
-        return sequence_status(run_id)
+        status = sequence_status(run_id)
+        if run_id and status.get("running") == "false":
+            record_run(
+                run_id,
+                TaskState.COMPLETED if str(status.get("returncode")) == "0" else TaskState.FAILED,
+                "so101_follower_sequence",
+                result={"content": "so101_follower_sequence", **status},
+                error=None if str(status.get("returncode")) == "0" else "Sequence failed",
+            )
+        return status
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

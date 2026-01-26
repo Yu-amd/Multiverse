@@ -336,6 +336,18 @@ export const FleetPage: React.FC = () => {
 
 
   const handleRunTask = (robotId: string) => {
+    if (robotId === 'reachy-001') {
+      navigate('/tasks?task=chat');
+      return;
+    }
+    if (robotId === 'so101-follower') {
+      navigate('/tasks?task=so101');
+      return;
+    }
+    if (robotId === 'so101-camera') {
+      navigate('/tasks');
+      return;
+    }
     navigate(`/tasks?robot=${robotId}`);
   };
 
@@ -369,6 +381,7 @@ export const FleetPage: React.FC = () => {
       loadConfig();
     }
   }, [robots]);
+
 
 
   const handleToggleHardware = async (robotId: string, robotUrl: string) => {
@@ -413,6 +426,46 @@ export const FleetPage: React.FC = () => {
       // Don't update state on error - keep current state
     } finally {
       setLoadingConfig(prev => ({ ...prev, [robotId]: false }));
+    }
+  };
+
+  const runCameraTask = async () => {
+    try {
+      const response = await fetch('http://localhost:9101/v1/so101/camera/start', {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to start camera stream');
+      }
+      showToast('Camera stream started', 'success');
+      navigate('/runs?robot=so101-camera&mode=stream');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to start camera stream';
+      showToast(message, 'error');
+    }
+  };
+
+  const runCameraFrameCapture = async () => {
+    try {
+      const response = await fetch('http://localhost:9101/v1/so101/camera/capture?warmup_frames=3', {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to capture frame');
+      }
+      const data = await response.json();
+      showToast('Frame captured', 'success');
+      const params = new URLSearchParams({
+        robot: 'so101-camera',
+        mode: 'frame',
+      });
+      if (data.artifact_path) params.set('artifact', data.artifact_path);
+      if (data.timestamp_ms) params.set('ts', String(data.timestamp_ms));
+      if (data.capture_latency_ms) params.set('latency', String(data.capture_latency_ms));
+      navigate(`/runs?${params.toString()}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to capture frame';
+      showToast(message, 'error');
     }
   };
 
@@ -604,6 +657,7 @@ export const FleetPage: React.FC = () => {
           }}
         />
       )}
+
 
     </div>
   );

@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import type { Message } from '../types';
 import { ChatContainer } from '../components/ChatContainer';
 import { CodePanel } from '../components/CodePanel';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import './TasksPage.css';
 
 interface TasksPageProps {
@@ -30,10 +30,11 @@ interface TasksPageProps {
 
 export const TasksPage: React.FC<TasksPageProps> = (props) => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [inputMessage] = useState('');
   const [showCodePreview, setShowCodePreview] = useState(false);
   const stopGenerationRef = useRef<(() => void) | null>(null);
-  const [selectedTask, setSelectedTask] = useState<'chat' | 'so101' | null>(null);
+  const [selectedTask, setSelectedTask] = useState<'chat' | 'so101' | 'so101-camera' | null>(null);
   const [showTaskOverlay, setShowTaskOverlay] = useState(false);
   const [showChatTask, setShowChatTask] = useState(false);
   const safeMessages: Message[] = props.messages ?? [];
@@ -60,6 +61,9 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
   const [so101Running, setSo101Running] = useState(false);
   const [so101Result, setSo101Result] = useState<{ ok: boolean; latencyMs: number } | null>(null);
   const [so101Error, setSo101Error] = useState<string | null>(null);
+  const [cameraRunning, setCameraRunning] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraPreviewError, setCameraPreviewError] = useState(false);
 
   useEffect(() => {
     const fetchDatasetInfo = async () => {
@@ -95,7 +99,7 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
   useEffect(() => {
     const taskParam = searchParams.get('task');
     if (taskParam === 'chat' || taskParam === 'so101') {
-      setSelectedTask(taskParam);
+      setSelectedTask(taskParam as 'chat' | 'so101');
       setShowTaskOverlay(true);
       if (taskParam === 'chat') {
         setShowChatTask(true);
@@ -163,6 +167,54 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
     }
   };
 
+  const runCameraFrameCapture = async () => {
+    if (cameraRunning) return;
+    setCameraRunning(true);
+    setCameraError(null);
+    try {
+      const response = await fetch('http://localhost:9101/v1/so101/camera/capture?warmup_frames=3', {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to capture frame');
+      }
+      const data = await response.json();
+      const params = new URLSearchParams({
+        robot: 'so101-camera',
+        mode: 'frame',
+      });
+      if (data.artifact_path) params.set('artifact', data.artifact_path);
+      if (data.timestamp_ms) params.set('ts', String(data.timestamp_ms));
+      if (data.capture_latency_ms) params.set('latency', String(data.capture_latency_ms));
+      navigate(`/runs?${params.toString()}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Camera capture failed';
+      setCameraError(message);
+    } finally {
+      setCameraRunning(false);
+    }
+  };
+
+  const runCameraStream = async () => {
+    if (cameraRunning) return;
+    setCameraRunning(true);
+    setCameraError(null);
+    try {
+      const response = await fetch('http://localhost:9101/v1/so101/camera/start', {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to start camera stream');
+      }
+      navigate('/runs?robot=so101-camera&mode=stream');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Camera stream failed';
+      setCameraError(message);
+    } finally {
+      setCameraRunning(false);
+    }
+  };
+
   return (
     <div className="tasks-page">
       <div className="tasks-page-content">
@@ -196,13 +248,33 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
             </div>
             <span className="task-tile-cta">Review & Run</span>
           </button>
+          <button
+            className={`task-tile ${selectedTask === 'so101-camera' ? 'active' : ''}`}
+            onClick={() => {
+              setSelectedTask('so101-camera');
+              setShowTaskOverlay(true);
+            }}
+            type="button"
+          >
+            <div>
+              <h2>SO-101 Camera Task</h2>
+              <p>Capture a snapshot or start a bounded stream session.</p>
+            </div>
+            <span className="task-tile-cta">Review & Run</span>
+          </button>
         </div>
 
         {showTaskOverlay && selectedTask && (
           <div className="task-overlay" onClick={() => setShowTaskOverlay(false)}>
             <div className="task-overlay-card" onClick={(event) => event.stopPropagation()}>
               <div className="task-overlay-header">
-                <h3>{selectedTask === 'chat' ? 'Chat Task' : 'SO-101 Replay Task'}</h3>
+                <h3>
+                  {selectedTask === 'chat'
+                    ? 'Chat Task'
+                    : selectedTask === 'so101-camera'
+                    ? 'SO-101 Camera Task'
+                    : 'SO-101 Replay Task'}
+                </h3>
                 <button
                   className="task-overlay-close"
                   onClick={() => setShowTaskOverlay(false)}
@@ -232,6 +304,52 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
                         onClick={() => setShowTaskOverlay(false)}
                       >
                         Cancel
+                      </button>
+                    </div>
+                  </>
+                ) : selectedTask === 'so101-camera' ? (
+                  <>
+                    <p>Run a camera snapshot or start a bounded stream session.</p>
+                    <div className="so101-camera-preview">
+                      {cameraPreviewError ? (
+                        <div className="so101-camera-preview-placeholder">
+                          Preview unavailable. Check camera device.
+                        </div>
+                      ) : (
+                        <img
+                          src="http://localhost:9101/v1/so101/camera/stream.mjpg?duration_s=60&fps=15&width=640&height=360"
+                          alt="SO-101 Camera Live Preview"
+                          onError={() => setCameraPreviewError(true)}
+                        />
+                      )}
+                    </div>
+                    <div className="so101-task-health">
+                      <div className="so101-task-status">
+                        <span>Camera</span>
+                        <span className={`so101-task-badge ${so101CameraOk ? 'ok' : 'error'}`}>
+                          {so101CameraOk ? 'READY' : 'UNPLUGGED'}
+                        </span>
+                      </div>
+                      <div className="so101-task-status">
+                        <span>Device</span>
+                        <span className="so101-task-path">{so101CameraPath || 'unknown'}</span>
+                      </div>
+                    </div>
+                    {cameraError && <div className="so101-task-error">Error: {cameraError}</div>}
+                    <div className="task-overlay-actions">
+                      <button
+                        className="btn btn-primary"
+                        onClick={runCameraFrameCapture}
+                        disabled={cameraRunning || !so101CameraOk}
+                      >
+                        {cameraRunning ? 'Running...' : 'Capture Frame'}
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={runCameraStream}
+                        disabled={cameraRunning || !so101CameraOk}
+                      >
+                        Start Stream
                       </button>
                     </div>
                   </>

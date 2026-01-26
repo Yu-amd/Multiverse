@@ -188,6 +188,18 @@ async def get_task_status(
     return tasks[task_id]
 
 
+@app.get("/v1/runs", response_model=list[TaskStatus])
+async def list_runs(
+    limit: int = 100,
+    authenticated: bool = Depends(verify_api_key),
+):
+    """
+    Return in-memory task history for the current service lifecycle.
+    """
+    ordered = sorted(tasks.values(), key=lambda item: item.created_at, reverse=True)
+    return ordered[: max(1, min(limit, 500))]
+
+
 @app.get("/v1/metrics")
 async def get_metrics(authenticated: bool = Depends(verify_api_key)):
     """

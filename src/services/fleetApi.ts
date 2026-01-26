@@ -357,11 +357,12 @@ class FleetApiService {
   /**
    * Get runs (task executions) for a robot
    */
-  async getRuns(robotId: string, limit: number = 50): Promise<TaskStatus[]> {
-    // TODO: Implement a runs endpoint or query task history
-    // For now, we'll need to track runs client-side or implement a history endpoint
-    // This is a placeholder that would need backend support
-    return [];
+  async getRuns(agentUrl: string = this.defaultAgentUrl, limit: number = 50): Promise<TaskStatus[]> {
+    const response = await fetch(`${agentUrl}/v1/runs?limit=${encodeURIComponent(limit)}`);
+    if (!response.ok) {
+      throw new Error(`Failed to get runs: ${response.statusText}`);
+    }
+    return response.json();
   }
 
   /**
