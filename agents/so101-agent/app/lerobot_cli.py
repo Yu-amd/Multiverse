@@ -28,6 +28,34 @@ class CmdResult:
 _TELEOP_PROCS: Dict[str, subprocess.Popen] = {}
 _SEQUENCE_PROCS: Dict[str, subprocess.Popen] = {}
 _SEQUENCE_OUTPUTS: Dict[str, Dict[str, str]] = {}
+_TELEOP_START: Dict[str, float] = {}
+_SEQUENCE_START: Dict[str, float] = {}
+_EXIT_EVENTS: List[Dict[str, object]] = []
+
+
+def _noop(*_args: object, **_kwargs: object) -> None:
+    return None
+
+
+try:
+    from app.observability import (
+        record_lerobot_exit_code,
+        record_lerobot_runtime,
+        record_lerobot_start_latency,
+    )
+except Exception:  # pragma: no cover - metrics are optional at runtime
+    record_lerobot_exit_code = _noop
+    record_lerobot_runtime = _noop
+    record_lerobot_start_latency = _noop
+
+
+def _cmd_label(args: List[str]) -> str:
+    return args[0] if args else "unknown"
+
+
+def _record_exit_event(cmd: str, code: int) -> None:
+    _EXIT_EVENTS.append({"cmd": cmd, "code": code, "ts": time.time()})
+    record_lerobot_exit_code(cmd, code)
 
 
 def _build_camera_json(cfg: dict) -> str:
@@ -72,6 +100,7 @@ def run_cmd(args: List[str], timeout_s: int = 20) -> CmdResult:
     """Run a short-lived CLI command and return structured result."""
     start_time = time.time()
     cmdline = " ".join(args)
+    cmd_label = _cmd_label(args)
     try:
         completed = subprocess.run(
             args,
@@ -81,6 +110,8 @@ def run_cmd(args: List[str], timeout_s: int = 20) -> CmdResult:
             check=False,
         )
         duration_ms = int((time.time() - start_time) * 1000)
+        record_lerobot_runtime(cmd_label, duration_ms)
+        _record_exit_event(cmd_label, completed.returncode)
         return CmdResult(
             ok=completed.returncode == 0,
             returncode=completed.returncode,
@@ -91,6 +122,8 @@ def run_cmd(args: List[str], timeout_s: int = 20) -> CmdResult:
         )
     except subprocess.TimeoutExpired as exc:
         duration_ms = int((time.time() - start_time) * 1000)
+        record_lerobot_runtime(cmd_label, duration_ms)
+        _record_exit_event(cmd_label, 124)
         return CmdResult(
             ok=False,
             returncode=124,
@@ -106,7 +139,7 @@ def start_teleop() -> Dict[str, str]:
     cfg = get_config()
     cmd = build_teleop_cmd(cfg)
     run_id = str(uuid.uuid4())
-
+    start_time = time.time()
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -114,7 +147,9 @@ def start_teleop() -> Dict[str, str]:
         text=True,
         start_new_session=True,  # required to kill process group on stop
     )
+    record_lerobot_start_latency(_cmd_label(cmd), int((time.time() - start_time) * 1000))
     _TELEOP_PROCS[run_id] = proc
+    _TELEOP_START[run_id] = start_time
     return {
         "run_id": run_id,
         "pid": str(proc.pid),
@@ -131,6 +166,10 @@ def stop_teleop(run_id: str) -> Dict[str, str]:
     try:
         os.killpg(proc.pid, signal.SIGTERM)
         proc.wait(timeout=5)
+        started_at = _TELEOP_START.pop(run_id, None)
+        if started_at:
+            record_lerobot_runtime("lerobot-teleoperate", int((time.time() - started_at) * 1000))
+        _record_exit_event("lerobot-teleoperate", proc.returncode or 0)
         _TELEOP_PROCS.pop(run_id, None)
         return {"ok": "true", "message": "teleop stopped"}
     except Exception:
@@ -138,6 +177,10 @@ def stop_teleop(run_id: str) -> Dict[str, str]:
             os.killpg(proc.pid, signal.SIGKILL)
         except Exception:
             pass
+        started_at = _TELEOP_START.pop(run_id, None)
+        if started_at:
+            record_lerobot_runtime("lerobot-teleoperate", int((time.time() - started_at) * 1000))
+        _record_exit_event("lerobot-teleoperate", proc.returncode or 1)
         _TELEOP_PROCS.pop(run_id, None)
         return {"ok": "false", "message": "forced stop issued"}
 
@@ -191,6 +234,7 @@ def start_pose_sequence() -> Dict[str, str]:
     """Start a pose sequence via the SDK shim."""
     cmd = _build_sequence_cmd()
     run_id = str(uuid.uuid4())
+    start_time = time.time()
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -198,7 +242,9 @@ def start_pose_sequence() -> Dict[str, str]:
         text=True,
         start_new_session=True,
     )
+    record_lerobot_start_latency(_cmd_label(cmd), int((time.time() - start_time) * 1000))
     _SEQUENCE_PROCS[run_id] = proc
+    _SEQUENCE_START[run_id] = start_time
     return {"run_id": run_id, "pid": str(proc.pid), "cmdline": " ".join(cmd)}
 
 
@@ -210,6 +256,10 @@ def stop_pose_sequence(run_id: str) -> Dict[str, str]:
     try:
         os.killpg(proc.pid, signal.SIGTERM)
         proc.wait(timeout=5)
+        started_at = _SEQUENCE_START.pop(run_id, None)
+        if started_at:
+            record_lerobot_runtime("lerobot-replay", int((time.time() - started_at) * 1000))
+        _record_exit_event("lerobot-replay", proc.returncode or 0)
         _SEQUENCE_PROCS.pop(run_id, None)
         _SEQUENCE_OUTPUTS.pop(run_id, None)
         return {"ok": "true", "message": "sequence stopped"}
@@ -218,6 +268,10 @@ def stop_pose_sequence(run_id: str) -> Dict[str, str]:
             os.killpg(proc.pid, signal.SIGKILL)
         except Exception:
             pass
+        started_at = _SEQUENCE_START.pop(run_id, None)
+        if started_at:
+            record_lerobot_runtime("lerobot-replay", int((time.time() - started_at) * 1000))
+        _record_exit_event("lerobot-replay", proc.returncode or 1)
         _SEQUENCE_PROCS.pop(run_id, None)
         _SEQUENCE_OUTPUTS.pop(run_id, None)
         return {"ok": "false", "message": "forced stop issued"}
@@ -240,6 +294,10 @@ def sequence_status(run_id: Optional[str] = None) -> Dict[str, str]:
             except Exception:
                 _SEQUENCE_OUTPUTS[run_id] = {"stdout": "", "stderr": ""}
             output = _SEQUENCE_OUTPUTS.get(run_id)
+            started_at = _SEQUENCE_START.pop(run_id, None)
+            if started_at:
+                record_lerobot_runtime("lerobot-replay", int((time.time() - started_at) * 1000))
+            _record_exit_event("lerobot-replay", returncode)
         return {
             "running": str(returncode is None).lower(),
             "pid": str(proc.pid),
@@ -257,4 +315,14 @@ def sequence_status(run_id: Optional[str] = None) -> Dict[str, str]:
 
 def get_cli_timeout() -> int:
     return 20
+
+
+def get_recent_exit_errors(window_s: int = 300) -> List[Dict[str, object]]:
+    now = time.time()
+    cutoff = now - window_s
+    return [
+        event
+        for event in _EXIT_EVENTS
+        if event.get("ts", 0) >= cutoff and int(event.get("code", 0)) != 0
+    ]
 

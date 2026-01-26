@@ -166,6 +166,7 @@ AgentStatus = common_models.AgentStatus
 
 common_settings = common_settings_module.settings
 StructuredLogger = common_observability.StructuredLogger
+set_device_ready = common_observability.set_device_ready
 track_task_metrics = common_observability.track_task_metrics
 verify_api_key = common_security.verify_api_key
 
@@ -211,7 +212,7 @@ async def get_agent_info_reachy():
     )
 
 # Import Reachy-specific modules
-from .backend_client import BackendClient
+from .backend_client import BackendClient, get_llm_health_snapshot
 from .gestures import GestureController
 from .reachy_driver import ReachyDriver
 
@@ -283,9 +284,14 @@ async def get_agent_health():
     # Check driver connection
     driver_ok = reachy_driver.is_connected()
     safety_ok = reachy_driver.check_safety()
-    
+
+    llm_health = get_llm_health_snapshot()
+    degraded = not (safety_ok and (driver_ok or reachy_driver.mocked)) or llm_health.get("degraded", False)
+
+    set_device_ready("reachy-001", not degraded)
+
     return HealthStatus(
-        status=AgentStatus.ONLINE if (safety_ok and (driver_ok or reachy_driver.mocked)) else AgentStatus.DEGRADED,
+        status=AgentStatus.DEGRADED if degraded else AgentStatus.ONLINE,
         last_seen=datetime.now(timezone.utc),
         sensors_ok=driver_ok,
         actuators_ok=driver_ok,
@@ -437,7 +443,7 @@ async def execute_task(task_id: str, task_request: TaskRequest):
         task_type=task_request.task_type
     )
     
-    with track_task_metrics(task_request.task_type, "reachy", task_id):
+    with track_task_metrics(task_request.task_type, "reachy", task_id, endpoint="reachy-001"):
         try:
             # Update state to acknowledged
             tasks[task_id].state = TaskState.ACKNOWLEDGED
@@ -639,104 +645,12 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                 logger.error("Done gesture traceback", traceback=traceback.format_exc())
                 # Continue execution even if gesture fails
             
-            # Play audio response through robot's speaker (if enabled)
-            # Check config file first, then environment variable
-            config_audio_enabled = is_audio_enabled()
-            env_audio_enabled = os.getenv("REACHY_AUDIO_ENABLED", "").lower()
-            if env_audio_enabled and env_audio_enabled in ("false", "0", "no", "off"):
-                audio_enabled = False
-            else:
-                audio_enabled = config_audio_enabled
-            
-            # Log audio configuration for debugging
-            print(f"🔵 Audio check: audio_enabled={audio_enabled}, response_length={len(response_content) if response_content else 0}, driver_mocked={reachy_driver.mocked}, driver_connected={reachy_driver.is_connected()}", flush=True)
-            logger.info(
-                "Audio check",
-                audio_enabled=audio_enabled,
-                response_content_length=len(response_content) if response_content else 0,
-                response_content_preview=response_content[:100] + "..." if response_content and len(response_content) > 100 else (response_content or ""),
-                driver_mocked=reachy_driver.mocked,
-                driver_connected=reachy_driver.is_connected()
-            )
-            
-            if audio_enabled and response_content:
-                print(f"🔵 Audio is enabled and response exists, entering audio section...", flush=True)
-                # Update audio controller with robot instance if available
-                robot_instance = None
-                if not reachy_driver.mocked:
-                    # Ensure driver is connected (use force=True to retry even if previous attempt failed)
-                    if not reachy_driver.is_connected():
-                        logger.info("Audio: Driver not connected, attempting connection...")
-                        try:
-                            # Wait for daemon/Zenoh to be ready if needed
-                            from app.daemon_manager import is_daemon_running, wait_for_zenoh_ready
-                            if is_daemon_running():
-                                loop = asyncio.get_event_loop()
-                                zenoh_ready = await loop.run_in_executor(None, wait_for_zenoh_ready, 5.0)
-                                if not zenoh_ready:
-                                    logger.warning("Audio: Zenoh not ready, but attempting connection anyway")
-                            
-                            # Use force=True to retry connection even if it failed before
-                            connected = await reachy_driver.connect(force=True)
-                            if connected and reachy_driver.is_connected():
-                                logger.info("Audio: Driver connected successfully")
-                            else:
-                                logger.warning("Audio: Driver connection failed, but audio may still work via PulseAudio", driver_connected=reachy_driver.is_connected())
-                        except Exception as e:
-                            logger.warning("Audio: Connection attempt failed, but audio may still work via PulseAudio", error=str(e))
-                    
-                    if reachy_driver.is_connected():
-                        robot_instance = reachy_driver.get_robot()
-                        if robot_instance:
-                            audio_controller.robot = robot_instance
-                            audio_controller.is_mocked = False
-                            logger.info("Audio: Robot connected, audio enabled", has_media=hasattr(robot_instance, 'media'))
-                        else:
-                            logger.warning("Audio: Robot instance is None")
-                    else:
-                        # Driver not connected, but audio can still work via PulseAudio (ALSA direct)
-                        # Set robot to None but keep is_mocked = False so audio uses PulseAudio
-                        logger.info("Audio: Driver not connected, will use PulseAudio (ALSA direct) for audio playback")
-                        audio_controller.robot = None
-                        audio_controller.is_mocked = False  # Not mocked, just using PulseAudio instead of SDK
-                        # Ensure temp directory exists for audio generation
-                        if audio_controller._temp_dir is None:
-                            import tempfile
-                            audio_controller._temp_dir = tempfile.mkdtemp(prefix="reachy_audio_")
-                else:
-                    logger.info("Audio: Hardware mocked, using mocked audio")
-                
-                # Speak the response
-                # Audio will work via PulseAudio even if robot is None (ALSA direct mode)
-                if audio_controller.robot and hasattr(audio_controller.robot, 'media'):
-                    logger.info("Audio: Robot and media available, speaking via SDK...", robot_type=type(audio_controller.robot).__name__)
-                else:
-                    logger.info("Audio: Using PulseAudio (ALSA direct) for audio playback", robot_available=audio_controller.robot is not None, is_mocked=audio_controller.is_mocked)
-                
-                # Actually speak
-                print(f"🔵 Audio: About to call speak() - is_mocked={audio_controller.is_mocked}, robot_available={audio_controller.robot is not None}, response_length={len(response_content)}", flush=True)
-                logger.info("Audio: About to call speak()", is_mocked=audio_controller.is_mocked, robot_available=audio_controller.robot is not None, response_length=len(response_content))
-                try:
-                    print(f"🔵 Calling audio_controller.speak()...", flush=True)
-                    speak_result = await audio_controller.speak(response_content)
-                    print(f"🔵✅ Audio speak completed: success={speak_result}", flush=True)
-                    logger.info("Audio: Speak completed", success=speak_result, text_length=len(response_content), is_mocked=audio_controller.is_mocked)
-                except Exception as audio_error:
-                    print(f"🔵❌ Audio speak failed: {str(audio_error)}", flush=True)
-                    logger.error("Audio speak failed", error=str(audio_error), error_type=type(audio_error).__name__)
-                    import traceback
-                    logger.error("Audio speak traceback", traceback=traceback.format_exc())
-                    # Continue execution even if audio fails
-            else:
-                print(f"🔵⚠️ Audio section skipped: audio_enabled={audio_enabled}, response_content={'exists' if response_content else 'None'}", flush=True)
-                logger.warning("Audio section skipped", audio_enabled=audio_enabled, has_response=response_content is not None and len(response_content) > 0)
-            
-            # Calculate end-to-end latency
+            # Calculate end-to-end latency (before TTS)
             end_time = datetime.now(timezone.utc)
             e2e_ms = int((end_time - start_time).total_seconds() * 1000)
             slo_pass = e2e_ms <= tasks[task_id].e2e_slo_ms if tasks[task_id].e2e_slo_ms else None
             
-            # Update task status
+            # Update task status before TTS so UI can stream immediately
             tasks[task_id].state = TaskState.COMPLETED
             tasks[task_id].progress = 1.0
             tasks[task_id].latency_ms = e2e_ms
@@ -774,6 +688,101 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                     "slo_pass": slo_pass,
                 },
             ))
+
+            async def run_tts() -> None:
+                # Play audio response through robot's speaker (if enabled)
+                # Check config file first, then environment variable
+                config_audio_enabled = is_audio_enabled()
+                env_audio_enabled = os.getenv("REACHY_AUDIO_ENABLED", "").lower()
+                if env_audio_enabled and env_audio_enabled in ("false", "0", "no", "off"):
+                    audio_enabled = False
+                else:
+                    audio_enabled = config_audio_enabled
+                
+                # Log audio configuration for debugging
+                print(f"🔵 Audio check: audio_enabled={audio_enabled}, response_length={len(response_content) if response_content else 0}, driver_mocked={reachy_driver.mocked}, driver_connected={reachy_driver.is_connected()}", flush=True)
+                logger.info(
+                    "Audio check",
+                    audio_enabled=audio_enabled,
+                    response_content_length=len(response_content) if response_content else 0,
+                    response_content_preview=response_content[:100] + "..." if response_content and len(response_content) > 100 else (response_content or ""),
+                    driver_mocked=reachy_driver.mocked,
+                    driver_connected=reachy_driver.is_connected()
+                )
+                
+                if audio_enabled and response_content:
+                    print(f"🔵 Audio is enabled and response exists, entering audio section...", flush=True)
+                    # Update audio controller with robot instance if available
+                    if not reachy_driver.mocked:
+                        # Ensure driver is connected (use force=True to retry even if previous attempt failed)
+                        if not reachy_driver.is_connected():
+                            logger.info("Audio: Driver not connected, attempting connection...")
+                            try:
+                                # Wait for daemon/Zenoh to be ready if needed
+                                from app.daemon_manager import is_daemon_running, wait_for_zenoh_ready
+                                if is_daemon_running():
+                                    loop = asyncio.get_event_loop()
+                                    zenoh_ready = await loop.run_in_executor(None, wait_for_zenoh_ready, 5.0)
+                                    if not zenoh_ready:
+                                        logger.warning("Audio: Zenoh not ready, but attempting connection anyway")
+                                
+                                # Use force=True to retry connection even if it failed before
+                                connected = await reachy_driver.connect(force=True)
+                                if connected and reachy_driver.is_connected():
+                                    logger.info("Audio: Driver connected successfully")
+                                else:
+                                    logger.warning("Audio: Driver connection failed, but audio may still work via PulseAudio", driver_connected=reachy_driver.is_connected())
+                            except Exception as e:
+                                logger.warning("Audio: Connection attempt failed, but audio may still work via PulseAudio", error=str(e))
+                        
+                        if reachy_driver.is_connected():
+                            robot_instance = reachy_driver.get_robot()
+                            if robot_instance:
+                                audio_controller.robot = robot_instance
+                                audio_controller.is_mocked = False
+                                logger.info("Audio: Robot connected, audio enabled", has_media=hasattr(robot_instance, 'media'))
+                            else:
+                                logger.warning("Audio: Robot instance is None")
+                        else:
+                            # Driver not connected, but audio can still work via PulseAudio (ALSA direct)
+                            # Set robot to None but keep is_mocked = False so audio uses PulseAudio
+                            logger.info("Audio: Driver not connected, will use PulseAudio (ALSA direct) for audio playback")
+                            audio_controller.robot = None
+                            audio_controller.is_mocked = False  # Not mocked, just using PulseAudio instead of SDK
+                            # Ensure temp directory exists for audio generation
+                            if audio_controller._temp_dir is None:
+                                import tempfile
+                                audio_controller._temp_dir = tempfile.mkdtemp(prefix="reachy_audio_")
+                    else:
+                        logger.info("Audio: Hardware mocked, using mocked audio")
+                    
+                    # Speak the response
+                    # Audio will work via PulseAudio even if robot is None (ALSA direct mode)
+                    if audio_controller.robot and hasattr(audio_controller.robot, 'media'):
+                        logger.info("Audio: Robot and media available, speaking via SDK...", robot_type=type(audio_controller.robot).__name__)
+                    else:
+                        logger.info("Audio: Using PulseAudio (ALSA direct) for audio playback", robot_available=audio_controller.robot is not None, is_mocked=audio_controller.is_mocked)
+                    
+                    # Actually speak
+                    print(f"🔵 Audio: About to call speak() - is_mocked={audio_controller.is_mocked}, robot_available={audio_controller.robot is not None}, response_length={len(response_content)}", flush=True)
+                    logger.info("Audio: About to call speak()", is_mocked=audio_controller.is_mocked, robot_available=audio_controller.robot is not None, response_length=len(response_content))
+                    try:
+                        print(f"🔵 Calling audio_controller.speak()...", flush=True)
+                        speak_result = await audio_controller.speak(response_content)
+                        print(f"🔵✅ Audio speak completed: success={speak_result}", flush=True)
+                        logger.info("Audio: Speak completed", success=speak_result, text_length=len(response_content), is_mocked=audio_controller.is_mocked)
+                    except Exception as audio_error:
+                        print(f"🔵❌ Audio speak failed: {str(audio_error)}", flush=True)
+                        logger.error("Audio speak failed", error=str(audio_error), error_type=type(audio_error).__name__)
+                        import traceback
+                        logger.error("Audio speak traceback", traceback=traceback.format_exc())
+                        # Continue execution even if audio fails
+                else:
+                    print(f"🔵⚠️ Audio section skipped: audio_enabled={audio_enabled}, response_content={'exists' if response_content else 'None'}", flush=True)
+                    logger.warning("Audio section skipped", audio_enabled=audio_enabled, has_response=response_content is not None and len(response_content) > 0)
+
+            # Run TTS in background so UI can stream immediately
+            asyncio.create_task(run_tts())
             
         except Exception as e:
             # Update task status to failed

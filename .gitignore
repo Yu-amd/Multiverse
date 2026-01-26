@@ -65,3 +65,10 @@ coverage.xml
 .venv
 env/
 ENV/
+
+# Run artifacts
+**/runs/
+**/runs/**/*.json
+**/runs/**/*.jpg
+**/runs/**/*.jpeg
+**/runs/**/*.png

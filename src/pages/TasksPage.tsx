@@ -35,8 +35,8 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
   const [showCodePreview, setShowCodePreview] = useState(false);
   const stopGenerationRef = useRef<(() => void) | null>(null);
   const [selectedTask, setSelectedTask] = useState<'chat' | 'so101' | 'so101-camera' | null>(null);
-  const [showTaskOverlay, setShowTaskOverlay] = useState(false);
   const [showChatTask, setShowChatTask] = useState(false);
+  const [chatRunning, setChatRunning] = useState(false);
   const safeMessages: Message[] = props.messages ?? [];
   const safeSetMessages: React.Dispatch<React.SetStateAction<Message[]>> =
     props.setMessages ?? (() => {});
@@ -100,12 +100,17 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
     const taskParam = searchParams.get('task');
     if (taskParam === 'chat' || taskParam === 'so101') {
       setSelectedTask(taskParam as 'chat' | 'so101');
-      setShowTaskOverlay(true);
       if (taskParam === 'chat') {
         setShowChatTask(true);
       }
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (selectedTask && selectedTask !== 'chat') {
+      setShowChatTask(false);
+    }
+  }, [selectedTask]);
 
   const runSo101Replay = async () => {
     if (so101Running) {
@@ -220,10 +225,9 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
       <div className="tasks-page-content">
         <div className="tasks-tiles">
           <button
-            className={`task-tile ${selectedTask === 'chat' ? 'active' : ''}`}
+            className={`task-tile ${selectedTask === 'chat' ? 'active' : ''} ${chatRunning ? 'running' : ''}`}
             onClick={() => {
               setSelectedTask('chat');
-              setShowTaskOverlay(true);
               setShowChatTask(true);
             }}
             type="button"
@@ -235,10 +239,10 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
             <span className="task-tile-cta">Open Chat</span>
           </button>
           <button
-            className={`task-tile ${selectedTask === 'so101' ? 'active' : ''}`}
+            className={`task-tile ${selectedTask === 'so101' ? 'active' : ''} ${so101Running ? 'running' : ''}`}
             onClick={() => {
               setSelectedTask('so101');
-              setShowTaskOverlay(true);
+              setShowChatTask(false);
             }}
             type="button"
           >
@@ -249,10 +253,10 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
             <span className="task-tile-cta">Review & Run</span>
           </button>
           <button
-            className={`task-tile ${selectedTask === 'so101-camera' ? 'active' : ''}`}
+            className={`task-tile ${selectedTask === 'so101-camera' ? 'active' : ''} ${cameraRunning ? 'running' : ''}`}
             onClick={() => {
               setSelectedTask('so101-camera');
-              setShowTaskOverlay(true);
+              setShowChatTask(false);
             }}
             type="button"
           >
@@ -264,50 +268,25 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
           </button>
         </div>
 
-        {showTaskOverlay && selectedTask && (
-          <div className="task-overlay" onClick={() => setShowTaskOverlay(false)}>
-            <div className="task-overlay-card" onClick={(event) => event.stopPropagation()}>
+        {selectedTask && selectedTask !== 'chat' && (
+          <div className="task-panel">
+            <div className="task-panel-card">
               <div className="task-overlay-header">
                 <h3>
-                  {selectedTask === 'chat'
-                    ? 'Chat Task'
-                    : selectedTask === 'so101-camera'
+                  {selectedTask === 'so101-camera'
                     ? 'SO-101 Camera Task'
                     : 'SO-101 Replay Task'}
                 </h3>
                 <button
                   className="task-overlay-close"
-                  onClick={() => setShowTaskOverlay(false)}
+                  onClick={() => setSelectedTask(null)}
                   type="button"
                 >
                   ✕
                 </button>
               </div>
               <div className="task-overlay-body">
-                {selectedTask === 'chat' ? (
-                  <>
-                    <p>
-                      Launch the chat workflow for natural language tasks routed through your configured backend.
-                    </p>
-                    <div className="task-overlay-actions">
-                      <button
-                        className="btn btn-primary"
-                        onClick={() => {
-                          setShowChatTask(true);
-                          setShowTaskOverlay(false);
-                        }}
-                      >
-                        Launch Chat
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => setShowTaskOverlay(false)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </>
-                ) : selectedTask === 'so101-camera' ? (
+                {selectedTask === 'so101-camera' ? (
                   <>
                     <p>Run a camera snapshot or start a bounded stream session.</p>
                     <div className="so101-camera-preview">
@@ -417,12 +396,6 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
                       >
                         {so101Running ? 'Running...' : 'Run Replay Task'}
                       </button>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => setShowTaskOverlay(false)}
-                      >
-                        Close
-                      </button>
                     </div>
                   </>
                 )}
@@ -432,8 +405,24 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
         )}
 
         {/* Chat Container - Full Width */}
-        {showChatTask && (
+        {showChatTask && selectedTask === 'chat' && (
           <div className="chat-wrapper">
+            <div className="task-overlay-header">
+              <h3>Chat Task</h3>
+              <button
+                className="task-overlay-close"
+                onClick={() => {
+                  setSelectedTask(null);
+                  setShowChatTask(false);
+                }}
+                type="button"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="chat-description">
+              Use chat to run natural language tasks against the active backend. Messages will stream below.
+            </div>
             <ChatContainer
             messages={safeMessages}
             setMessages={safeSetMessages}
@@ -455,6 +444,7 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
             onStopGenerationRef={stopGenerationRef}
             onToggleCodePreview={() => setShowCodePreview(!showCodePreview)}
             showCodePreview={showCodePreview}
+            onRunningChange={setChatRunning}
           />
           </div>
         )}

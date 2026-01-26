@@ -5,6 +5,7 @@ Provides health, info, and teleop management endpoints.
 import os
 import sys
 import uuid
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any
@@ -84,6 +85,9 @@ TaskState = common_models.TaskState
 
 common_settings = common_settings_module.settings
 StructuredLogger = common_observability.StructuredLogger
+record_task_run_start = common_observability.record_task_run_start
+record_task_run_finish = common_observability.record_task_run_finish
+record_e2e_action_latency = common_observability.record_e2e_action_latency
 
 logger = StructuredLogger(__name__)
 
@@ -173,6 +177,7 @@ from .camera import (
     get_latest_frame_base64,
     stream_mjpeg,
 )
+from .leader_state import get_leader_joint_snapshot
 from .run_history import record_run, list_runs as list_so101_runs
 
 _current_camera_stream_run_id: str | None = None
@@ -204,18 +209,36 @@ async def list_runs(limit: int = 100):
 
 @app.post("/v1/so101/teleop/start")
 async def teleop_start():
+    start_ts = time.time()
+    record_task_run_start("so101-follower", "teleop_start")
     try:
         result = start_teleop()
         run_id = result.get("run_id")
         if run_id:
             record_run(run_id, TaskState.RUNNING, "so101_teleop")
+        record_e2e_action_latency("so101-follower", "teleop_start", (time.time() - start_ts) * 1000.0)
+        record_task_run_finish(
+            "so101-follower",
+            "teleop_start",
+            "success",
+            int((time.time() - start_ts) * 1000),
+        )
         return {"success": True, **result}
     except Exception as e:
+        record_task_run_finish(
+            "so101-follower",
+            "teleop_start",
+            "error",
+            int((time.time() - start_ts) * 1000),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/v1/so101/teleop/stop")
 async def teleop_stop(run_id: str):
+    start_ts = time.time()
+    record_task_run_start("so101-follower", "teleop_stop")
     try:
         result = stop_teleop(run_id)
         record_run(
@@ -225,8 +248,22 @@ async def teleop_stop(run_id: str):
             result={"content": "so101_teleop", **result},
             error=None if result.get("ok") == "true" else result.get("message"),
         )
+        record_task_run_finish(
+            "so101-follower",
+            "teleop_stop",
+            "success" if result.get("ok") == "true" else "error",
+            int((time.time() - start_ts) * 1000),
+            error_type=None if result.get("ok") == "true" else "StopFailed",
+        )
         return {"success": result.get("ok") == "true", **result}
     except Exception as e:
+        record_task_run_finish(
+            "so101-follower",
+            "teleop_stop",
+            "error",
+            int((time.time() - start_ts) * 1000),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -247,6 +284,8 @@ async def camera_capture(
     warmup_frames: int = 3,
 ):
     run_id = run_id or str(uuid.uuid4())
+    start_ts = time.time()
+    record_task_run_start("so101-camera", "camera_capture")
     try:
         result = capture_frame(
             run_id,
@@ -256,6 +295,13 @@ async def camera_capture(
             warmup_frames=warmup_frames,
         )
         if not result.get("ok"):
+            record_task_run_finish(
+                "so101-camera",
+                "camera_capture",
+                "error",
+                int((time.time() - start_ts) * 1000),
+                error_type="CaptureFailed",
+            )
             raise HTTPException(status_code=500, detail=result.get("error", "capture failed"))
         record_run(
             run_id,
@@ -263,10 +309,23 @@ async def camera_capture(
             "so101_camera_capture",
             result={"content": "so101_camera_capture", **result},
         )
+        record_task_run_finish(
+            "so101-camera",
+            "camera_capture",
+            "success",
+            int((time.time() - start_ts) * 1000),
+        )
         return {"success": True, "run_id": run_id, **result}
     except HTTPException:
         raise
     except Exception as e:
+        record_task_run_finish(
+            "so101-camera",
+            "camera_capture",
+            "error",
+            int((time.time() - start_ts) * 1000),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -277,11 +336,20 @@ async def camera_start(
     width: int | None = None,
     height: int | None = None,
 ):
+    start_ts = time.time()
+    record_task_run_start("so101-camera", "camera_stream_start")
     try:
         global _current_camera_stream_run_id
         _current_camera_stream_run_id = str(uuid.uuid4())
         result = start_stream(fps, duration_s=duration_s, width=width, height=height)
         if not result.get("ok"):
+            record_task_run_finish(
+                "so101-camera",
+                "camera_stream_start",
+                "error",
+                int((time.time() - start_ts) * 1000),
+                error_type="StreamStartFailed",
+            )
             raise HTTPException(status_code=500, detail=result.get("error", "start failed"))
         record_run(
             _current_camera_stream_run_id,
@@ -297,15 +365,31 @@ async def camera_start(
             f"/v1/so101/camera/stream.mjpg?duration_s={duration_s}"
             f"&fps={resolved_fps}&width={resolved_width}&height={resolved_height}"
         )
+        record_e2e_action_latency("so101-camera", "camera_stream_start", (time.time() - start_ts) * 1000.0)
+        record_task_run_finish(
+            "so101-camera",
+            "camera_stream_start",
+            "success",
+            int((time.time() - start_ts) * 1000),
+        )
         return {"success": True, "stream_url": stream_url, "run_id": _current_camera_stream_run_id, **result}
     except HTTPException:
         raise
     except Exception as e:
+        record_task_run_finish(
+            "so101-camera",
+            "camera_stream_start",
+            "error",
+            int((time.time() - start_ts) * 1000),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/v1/so101/camera/stop")
 async def camera_stop():
+    start_ts = time.time()
+    record_task_run_start("so101-camera", "camera_stream_stop")
     try:
         global _current_camera_stream_run_id
         result = stop_stream()
@@ -317,8 +401,21 @@ async def camera_stop():
                 result={"content": "so101_camera_stream", **result},
             )
             _current_camera_stream_run_id = None
+        record_task_run_finish(
+            "so101-camera",
+            "camera_stream_stop",
+            "success",
+            int((time.time() - start_ts) * 1000),
+        )
         return {"success": True, **result}
     except Exception as e:
+        record_task_run_finish(
+            "so101-camera",
+            "camera_stream_stop",
+            "error",
+            int((time.time() - start_ts) * 1000),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -358,10 +455,19 @@ async def camera_stream_mjpeg(
 
 @app.post("/v1/so101/follower/sequence/start")
 async def follower_sequence_start():
+    start_ts = time.time()
+    record_task_run_start("so101-follower", "pose_sequence_start")
     try:
         follower_cfg = get_follower_settings()
         port_path = follower_cfg.get("port", "")
         if not port_path or not Path(port_path).exists():
+            record_task_run_finish(
+                "so101-follower",
+                "pose_sequence_start",
+                "error",
+                int((time.time() - start_ts) * 1000),
+                error_type="PortUnavailable",
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"Follower port not available at {port_path}. Replug device or reload udev."
@@ -375,15 +481,31 @@ async def follower_sequence_start():
                 "so101_follower_sequence",
                 result={"content": "so101_follower_sequence", **result},
             )
+        record_e2e_action_latency("so101-follower", "pose_sequence_start", (time.time() - start_ts) * 1000.0)
+        record_task_run_finish(
+            "so101-follower",
+            "pose_sequence_start",
+            "success",
+            int((time.time() - start_ts) * 1000),
+        )
         return {"success": True, **result}
     except HTTPException:
         raise
     except Exception as e:
+        record_task_run_finish(
+            "so101-follower",
+            "pose_sequence_start",
+            "error",
+            int((time.time() - start_ts) * 1000),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/v1/so101/follower/sequence/stop")
 async def follower_sequence_stop(run_id: str):
+    start_ts = time.time()
+    record_task_run_start("so101-follower", "pose_sequence_stop")
     try:
         result = stop_pose_sequence(run_id)
         record_run(
@@ -393,8 +515,22 @@ async def follower_sequence_stop(run_id: str):
             result={"content": "so101_follower_sequence", **result},
             error=None if result.get("ok") == "true" else result.get("message"),
         )
+        record_task_run_finish(
+            "so101-follower",
+            "pose_sequence_stop",
+            "success" if result.get("ok") == "true" else "error",
+            int((time.time() - start_ts) * 1000),
+            error_type=None if result.get("ok") == "true" else "StopFailed",
+        )
         return {"success": result.get("ok") == "true", **result}
     except Exception as e:
+        record_task_run_finish(
+            "so101-follower",
+            "pose_sequence_stop",
+            "error",
+            int((time.time() - start_ts) * 1000),
+            error_type=type(e).__name__,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -442,4 +578,10 @@ async def follower_sequence_info():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/so101/leader/joints")
+async def leader_joint_status():
+    """Return current leader joint readings."""
+    return get_leader_joint_snapshot()
 

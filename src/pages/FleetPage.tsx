@@ -22,7 +22,7 @@ const getRoleLabel = (robotId: string) => {
 
 const StatusCheckModal: React.FC<StatusCheckModalProps> = ({ robot, isOpen, onClose }) => {
   const [checking, setChecking] = useState(false);
-  const [health, setHealth] = useState<Robot['health']>(robot.health);
+  const [health, setHealth] = useState<any>(robot.health);
   const [config, setConfig] = useState<any>(null);
   const { showToast } = useToast();
 
@@ -429,46 +429,6 @@ export const FleetPage: React.FC = () => {
     }
   };
 
-  const runCameraTask = async () => {
-    try {
-      const response = await fetch('http://localhost:9101/v1/so101/camera/start', {
-        method: 'POST',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to start camera stream');
-      }
-      showToast('Camera stream started', 'success');
-      navigate('/runs?robot=so101-camera&mode=stream');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to start camera stream';
-      showToast(message, 'error');
-    }
-  };
-
-  const runCameraFrameCapture = async () => {
-    try {
-      const response = await fetch('http://localhost:9101/v1/so101/camera/capture?warmup_frames=3', {
-        method: 'POST',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to capture frame');
-      }
-      const data = await response.json();
-      showToast('Frame captured', 'success');
-      const params = new URLSearchParams({
-        robot: 'so101-camera',
-        mode: 'frame',
-      });
-      if (data.artifact_path) params.set('artifact', data.artifact_path);
-      if (data.timestamp_ms) params.set('ts', String(data.timestamp_ms));
-      if (data.capture_latency_ms) params.set('latency', String(data.capture_latency_ms));
-      navigate(`/runs?${params.toString()}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to capture frame';
-      showToast(message, 'error');
-    }
-  };
-
 
   if (loading) {
     return (
@@ -500,6 +460,104 @@ export const FleetPage: React.FC = () => {
   );
   const agentsRunning = robots.some(
     (robot) => robot.status === 'READY' || robot.status === 'DEGRADED'
+  );
+
+  const controlSurfaceRobots = robots.filter((robot) => robot.id === 'so101-leader');
+  const taskEndpointRobots = robots.filter((robot) => robot.id !== 'so101-leader');
+
+  const renderRobotGrid = (list: Robot[]) => (
+    <div className="fleet-grid">
+      {list.map((robot) => (
+        <div key={robot.id} className="robot-card">
+          <div className="robot-card-header">
+            <div className="robot-card-title">
+              <h3>{robot.name}</h3>
+              <span className="robot-role">{getRoleLabel(robot.id)}</span>
+            </div>
+            <div
+              className="robot-status"
+              style={{ color: getStatusColor(robot.status) }}
+            >
+              <span className="status-dot">●</span>
+              {robot.status}
+            </div>
+          </div>
+
+          <div className="robot-card-body">
+            <div className="robot-info-row">
+              <span className="info-label">BACKEND</span>
+              <span className="info-value">{robot.backend}</span>
+            </div>
+            {robot.health?.uptime_seconds && (
+              <div className="robot-info-row">
+                <span className="info-label">UPTIME</span>
+                <span className="info-value">{Math.floor(robot.health.uptime_seconds / 60)} min</span>
+              </div>
+            )}
+            <div className="robot-capabilities">
+              {robot.capabilities.map((cap) => (
+                <span key={cap} className="capability-tag">
+                  {cap}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="robot-card-actions">
+            {robot.id === 'reachy-001' && (
+              <button
+                className={`btn ${hardwareEnabled[robot.id] ? 'btn-success' : 'btn-secondary'}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!loadingConfig[robot.id]) {
+                    handleToggleHardware(robot.id, robot.url);
+                  }
+                }}
+                disabled={!!loadingConfig[robot.id]}
+                style={{
+                  flex: '0 0 auto',
+                  minWidth: '120px',
+                  pointerEvents: loadingConfig[robot.id] ? 'none' : 'auto'
+                }}
+                type="button"
+                aria-label={hardwareEnabled[robot.id] ? 'Disable hardware' : 'Enable hardware'}
+              >
+                {loadingConfig[robot.id]
+                  ? '...'
+                  : (hardwareEnabled[robot.id] !== undefined && hardwareEnabled[robot.id]
+                    ? '✓ Hardware ON'
+                    : 'Hardware OFF')}
+              </button>
+            )}
+            <button
+              className="btn btn-secondary"
+              onClick={() => handleCheckStatus(robot)}
+              type="button"
+              title="Check robot status and health"
+            >
+              Status
+            </button>
+            {robot.id !== 'so101-leader' && (
+              <button
+                className="btn btn-primary"
+                onClick={() => handleRunTask(robot.id)}
+                type="button"
+              >
+                Run Task
+              </button>
+            )}
+            <button
+              className="btn btn-secondary"
+              onClick={() => handleView(robot.id)}
+              type="button"
+            >
+              View
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 
   return (
@@ -553,97 +611,25 @@ export const FleetPage: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div className="fleet-grid">
-          {robots.map((robot) => (
-            <div key={robot.id} className="robot-card">
-              <div className="robot-card-header">
-                <div className="robot-card-title">
-                  <h3>{robot.name}</h3>
-                  <span className="robot-role">{getRoleLabel(robot.id)}</span>
-                </div>
-                <div
-                  className="robot-status"
-                  style={{ color: getStatusColor(robot.status) }}
-                >
-                  <span className="status-dot">●</span>
-                  {robot.status}
-                </div>
-              </div>
-
-              <div className="robot-card-body">
-                <div className="robot-info-row">
-                  <span className="info-label">BACKEND</span>
-                  <span className="info-value">{robot.backend}</span>
-                </div>
-                {robot.health?.uptime_seconds && (
-                  <div className="robot-info-row">
-                    <span className="info-label">UPTIME</span>
-                    <span className="info-value">{Math.floor(robot.health.uptime_seconds / 60)} min</span>
-                  </div>
-                )}
-                <div className="robot-capabilities">
-                  {robot.capabilities.map((cap) => (
-                    <span key={cap} className="capability-tag">
-                      {cap}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="robot-card-actions">
-                {robot.id === 'reachy-001' && (
-                  <button
-                    className={`btn ${hardwareEnabled[robot.id] ? 'btn-success' : 'btn-secondary'}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (!loadingConfig[robot.id]) {
-                        handleToggleHardware(robot.id, robot.url);
-                      }
-                    }}
-                    disabled={!!loadingConfig[robot.id]}
-                    style={{ 
-                      flex: '0 0 auto', 
-                      minWidth: '120px',
-                      pointerEvents: loadingConfig[robot.id] ? 'none' : 'auto'
-                    }}
-                    type="button"
-                    aria-label={hardwareEnabled[robot.id] ? 'Disable hardware' : 'Enable hardware'}
-                  >
-                    {loadingConfig[robot.id] 
-                      ? '...' 
-                      : (hardwareEnabled[robot.id] !== undefined && hardwareEnabled[robot.id] 
-                          ? '✓ Hardware ON' 
-                          : 'Hardware OFF')}
-                  </button>
-                )}
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => handleCheckStatus(robot)}
-                  type="button"
-                  title="Check robot status and health"
-                >
-                  Status
-                </button>
-                {robot.id !== 'so101-leader' && (
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => handleRunTask(robot.id)}
-                    type="button"
-                  >
-                    Run Task
-                  </button>
-                )}
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => handleView(robot.id)}
-                  type="button"
-                >
-                  View
-                </button>
-              </div>
+        <div className="fleet-sections">
+          <section className="fleet-section">
+            <div className="fleet-section-header">
+              <h2>Control Surface</h2>
+              <span>{controlSurfaceRobots.length} endpoint{controlSurfaceRobots.length === 1 ? '' : 's'}</span>
             </div>
-          ))}
+            {controlSurfaceRobots.length > 0 ? (
+              renderRobotGrid(controlSurfaceRobots)
+            ) : (
+              <div className="fleet-section-empty">No control surface endpoints detected.</div>
+            )}
+          </section>
+          <section className="fleet-section">
+            <div className="fleet-section-header">
+              <h2>Task Endpoints</h2>
+              <span>{taskEndpointRobots.length} endpoint{taskEndpointRobots.length === 1 ? '' : 's'}</span>
+            </div>
+            {renderRobotGrid(taskEndpointRobots)}
+          </section>
         </div>
       )}
 

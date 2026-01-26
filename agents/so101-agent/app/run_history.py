@@ -2,7 +2,9 @@
 In-memory run history for SO-101 endpoints.
 Persists for the lifetime of the agent process.
 """
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from threading import Lock
 from typing import Dict, List, Optional
 
@@ -28,6 +30,7 @@ def record_run(
             existing.result = result if result is not None else existing.result
             existing.error = error if error is not None else existing.error
             existing.progress = 1.0 if state in (TaskState.COMPLETED, TaskState.FAILED) else existing.progress
+            _write_run_artifact(existing)
             return existing
 
         status = TaskStatus(
@@ -40,6 +43,7 @@ def record_run(
             updated_at=now,
         )
         _runs[run_id] = status
+        _write_run_artifact(status)
         return status
 
 
@@ -52,4 +56,21 @@ def list_runs(limit: int = 100) -> List[TaskStatus]:
 def get_run(run_id: str) -> Optional[TaskStatus]:
     with _lock:
         return _runs.get(run_id)
+
+
+def _write_run_artifact(status: TaskStatus) -> None:
+    try:
+        output_dir = Path(__file__).parent.parent / "runs" / status.task_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        payload = status.model_dump()
+        payload["artifact_type"] = "run_history"
+        payload["updated_at"] = status.updated_at.isoformat() if status.updated_at else None
+        payload["created_at"] = status.created_at.isoformat() if status.created_at else None
+        (output_dir / "run.json").write_text(
+            json.dumps(payload, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        # Best-effort logging only
+        return None
 

@@ -27,6 +27,7 @@ interface ChatContainerProps {
   onStopGenerationRef?: React.MutableRefObject<(() => void) | null>;
   onToggleCodePreview?: () => void;
   showCodePreview?: boolean;
+  onRunningChange?: (running: boolean) => void;
 }
 
 export const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -49,7 +50,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
   handleDeleteMessage,
   onStopGenerationRef,
   onToggleCodePreview,
-  showCodePreview = false
+  showCodePreview = false,
+  onRunningChange
 }) => {
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const virtualizedMessagesRef = useRef<VirtualizedMessagesRef>(null);
@@ -110,6 +112,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
   
   // Track if we should auto-send when inputMessage is set by prompt set
   const shouldAutoSendRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (onRunningChange) {
+      onRunningChange(isLoading || isThinking || isRunningPromptSet);
+    }
+  }, [onRunningChange, isLoading, isThinking, isRunningPromptSet]);
   
   // Auto-send when inputMessage is set by prompt set execution
   useEffect(() => {

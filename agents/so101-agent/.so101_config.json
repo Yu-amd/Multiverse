@@ -15,11 +15,12 @@
     "enabled": true
   },
   "camera": {
-    "device": "/dev/robot_cam",
+    "device": "/dev/video0",
     "width": 1920,
     "height": 1080,
     "fps": 30,
-    "fourcc": "MJPG"
+    "fourcc": "MJPG",
+    "device_name": "USB2.0_CAM1: USB2.0_CAM1"
   },
   "teleop": {
     "display_data": true,
@@ -34,4 +35,3 @@
     "udev_reload_on_start": false
   }
 }
-
