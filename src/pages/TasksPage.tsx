@@ -64,6 +64,9 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
   const [cameraRunning, setCameraRunning] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraPreviewError, setCameraPreviewError] = useState(false);
+  const [reachyConnected, setReachyConnected] = useState<boolean | null>(null);
+  const [reachyHardwareEnabled, setReachyHardwareEnabled] = useState<boolean | null>(null);
+  const [reachySerialPort, setReachySerialPort] = useState('');
 
   useEffect(() => {
     const fetchDatasetInfo = async () => {
@@ -111,6 +114,42 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
       setShowChatTask(false);
     }
   }, [selectedTask]);
+
+  useEffect(() => {
+    if (!showChatTask || selectedTask !== 'chat') {
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    const fetchReachyStatus = async () => {
+      setReachyConnected(null);
+      try {
+        const response = await fetch('http://localhost:9001/v1/agent/config', {
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error('Reachy config unavailable');
+        }
+        const data = await response.json();
+        if (!active) return;
+        setReachyConnected(Boolean(data.runtime?.driver_connected));
+        setReachyHardwareEnabled(Boolean(data.runtime?.hardware_enabled));
+        setReachySerialPort(data.config_file?.serial_port || data.runtime?.serial_port || '');
+      } catch (err) {
+        if (!active) return;
+        setReachyConnected(false);
+        setReachyHardwareEnabled(false);
+        setReachySerialPort('');
+      }
+    };
+    fetchReachyStatus();
+    const interval = setInterval(fetchReachyStatus, 5000);
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, [showChatTask, selectedTask]);
 
   const runSo101Replay = async () => {
     if (so101Running) {
@@ -438,6 +477,32 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
             </div>
             <div className="chat-description">
               Use chat to run natural language tasks against the active backend. Messages will stream below.
+            </div>
+            <div className="so101-task-health">
+              <div className="so101-task-status">
+                <span>Reachy</span>
+                <span
+                  className={`so101-task-badge ${
+                    reachyConnected === null ? 'neutral' : reachyConnected ? 'ok' : 'error'
+                  }`}
+                >
+                  {reachyConnected === null ? 'CHECKING' : reachyConnected ? 'READY' : 'DISCONNECTED'}
+                </span>
+              </div>
+              <div className="so101-task-status">
+                <span>Hardware</span>
+                <span
+                  className={`so101-task-badge ${
+                    reachyHardwareEnabled === null ? 'neutral' : reachyHardwareEnabled ? 'ok' : 'error'
+                  }`}
+                >
+                  {reachyHardwareEnabled === null ? 'CHECKING' : reachyHardwareEnabled ? 'ON' : 'OFF'}
+                </span>
+              </div>
+              <div className="so101-task-status">
+                <span>Serial</span>
+                <span className="so101-task-path">{reachySerialPort || 'auto-detect'}</span>
+              </div>
             </div>
             <ChatContainer
             messages={safeMessages}

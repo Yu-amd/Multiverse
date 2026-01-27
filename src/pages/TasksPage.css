@@ -22,7 +22,8 @@
   min-width: 0;
   min-height: 0;
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   box-sizing: border-box;
   width: 100%;
   max-width: calc(100vw - 200px - 4rem); /* Account for nav (200px) + padding (2rem each side) */
@@ -267,6 +268,12 @@
   color: #ef4444;
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.so101-task-badge.neutral {
+  color: #a0aec0;
+  background: rgba(148, 163, 184, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.35);
 }
 
 .so101-task-error {

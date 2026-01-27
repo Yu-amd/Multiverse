@@ -99,16 +99,17 @@ class AudioController:
                     if line.strip():
                         parts = line.split('\t')
                         if len(parts) >= 2:
-                            sink_name = parts[1].lower()
-            # Look for Reachy or USB in sink name
-            # Also check for "Pollen" (Reachy Mini manufacturer name)
-            if ('reachy' in sink_name or 'pollen' in sink_name or 
-                ('usb' in sink_name and 'audio' in sink_name)):
-                # Use PulseAudio sink name
-                device_str = f"pulse:{parts[0]}"  # Use sink index
-                logger.info(f"✓ Detected Reachy Mini audio device (PulseAudio): {parts[1]} (sink {parts[0]})")
-                self._audio_device_detected = device_str
-                return device_str
+                            sink_name = parts[1]
+                            sink_name_lower = sink_name.lower()
+                            # Look for Reachy or USB in sink name
+                            # Also check for "Pollen" (Reachy Mini manufacturer name)
+                            if ('reachy' in sink_name_lower or 'pollen' in sink_name_lower or 
+                                ('usb' in sink_name_lower and 'audio' in sink_name_lower)):
+                                # Use PulseAudio sink name (stable across restarts)
+                                device_str = f"pulse:{sink_name}"
+                                logger.info(f"✓ Detected Reachy Mini audio device (PulseAudio): {sink_name}")
+                                self._audio_device_detected = device_str
+                                return device_str
         except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
             pass
         
@@ -305,23 +306,26 @@ class AudioController:
                 sink_name = None
                 if audio_device and audio_device.startswith('pulse:'):
                     sink_id = audio_device.split(':', 1)[1]
-                    # Get sink name from sink ID
-                    try:
-                        result = subprocess.run(
-                            ['pactl', 'list', 'sinks', 'short'],
-                            capture_output=True,
-                            text=True,
-                            timeout=2.0
-                        )
-                        if result.returncode == 0:
-                            for line in result.stdout.split('\n'):
-                                if line.strip().startswith(sink_id):
-                                    parts = line.split('\t')
-                                    if len(parts) >= 2:
-                                        sink_name = parts[1]
-                                    break
-                    except Exception:
-                        pass
+                    if sink_id.isdigit():
+                        # Get sink name from sink ID
+                        try:
+                            result = subprocess.run(
+                                ['pactl', 'list', 'sinks', 'short'],
+                                capture_output=True,
+                                text=True,
+                                timeout=2.0
+                            )
+                            if result.returncode == 0:
+                                for line in result.stdout.split('\n'):
+                                    if line.strip().startswith(sink_id):
+                                        parts = line.split('\t')
+                                        if len(parts) >= 2:
+                                            sink_name = parts[1]
+                                        break
+                        except Exception:
+                            pass
+                    else:
+                        sink_name = sink_id
                     self._set_audio_volume(sink_name or sink_id)
                     # Use sink name if available, otherwise use index
                     play_cmd = ['paplay', '--device', sink_name or sink_id, audio_file]
@@ -401,6 +405,27 @@ class AudioController:
                         return True
                     else:
                         logger.warning("Audio playback failed", returncode=play_proc.returncode, device=audio_device)
+                        # Retry once with fresh sink detection
+                        audio_device = self._detect_audio_device()
+                        if audio_device:
+                            logger.info("Retrying audio playback with refreshed device", device=audio_device)
+                            if audio_device.startswith('pulse:'):
+                                sink_id = audio_device.split(':', 1)[1]
+                                sink_name = sink_id
+                                self._set_audio_volume(sink_name)
+                                play_cmd = ['paplay', '--device', sink_name, audio_file]
+                            else:
+                                play_cmd = ['paplay', audio_file]
+                            play_proc = await asyncio.create_subprocess_exec(
+                                *play_cmd,
+                                stdout=asyncio.subprocess.DEVNULL,
+                                stderr=asyncio.subprocess.DEVNULL,
+                                env=audio_env
+                            )
+                            await asyncio.wait_for(play_proc.wait(), timeout=60.0)
+                            if play_proc.returncode == 0:
+                                logger.info("Audio: Successfully played after retry", duration=time.time() - start_time, device=audio_device)
+                                return True
                         # Fallback to estimated duration
                         estimated = max(0.5, len(text) * 0.08)
                         logger.info("Audio: Estimated playback duration", duration=estimated)

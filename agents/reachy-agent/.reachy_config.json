@@ -1,4 +1,5 @@
 {
-  "hardware_enabled": true,
-  "audio_enabled": true
+  "hardware_enabled": false,
+  "audio_enabled": true,
+  "serial_port": "/dev/ttyACM1"
 }
