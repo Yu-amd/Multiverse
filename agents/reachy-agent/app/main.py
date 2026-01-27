@@ -125,6 +125,7 @@ except Exception as e:
 # Now safe to import FastAPI and other dependencies
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
+import re
 from fastapi import Depends, HTTPException, status, BackgroundTasks, Body
 
 # CRITICAL: Add current directory back to sys.path AFTER loading common framework
@@ -430,6 +431,23 @@ async def create_task(
     return task_status
 
 
+def _sanitize_response(content: str) -> str:
+    """Keep responses short, demo-friendly, and free of DevOps jargon."""
+    if not content:
+        return ""
+    text = " ".join(content.strip().split())
+    # Remove sentences with DevOps/tooling jargon for demo clarity.
+    forbidden = re.compile(r"\b(devops|kubernetes|cluster|infrastructure|logs?|metrics?|deploy(?:ment)?|pipeline|ci/cd|docker)\b", re.IGNORECASE)
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    filtered = [s for s in sentences if not forbidden.search(s)]
+    if not filtered:
+        filtered = sentences
+    result = " ".join(filtered[:2]).strip()
+    if len(result) > 320:
+        result = result[:317].rstrip() + "..."
+    return result
+
+
 async def execute_task(task_id: str, task_request: TaskRequest):
     """
     Execute a task asynchronously.
@@ -488,20 +506,19 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                 except Exception as e:
                     logger.error("Exception during robot connection attempt", error=str(e), error_type=type(e).__name__)
             
-            # Reset robot to rest position on first successful connection
-            # This ensures the robot starts in a known good pose after being turned off
-            if first_connection and reachy_driver.is_connected():
-                print(f"🔵 First connection successful - resetting robot to rest position...", flush=True)
-                logger.info("First connection after hardware enable - resetting robot to rest position")
+            # Wake the robot when a chat task is launched so it's obvious it's active.
+            if reachy_driver.is_connected():
+                print("🔵 Chat task launched - running wake-up gesture...", flush=True)
+                logger.info("Chat task launched - running wake-up gesture")
                 try:
                     await asyncio.sleep(0.5)  # Wait a moment for connection to stabilize
-                    await gesture_controller.return_to_rest()
-                    print(f"🔵✅ Robot reset to rest position on first connection", flush=True)
-                    logger.info("Robot reset to rest position on first connection completed")
+                    await gesture_controller.wake_up_gesture()
+                    print("🔵✅ Wake-up gesture completed", flush=True)
+                    logger.info("Wake-up gesture completed on task launch")
                 except Exception as reset_error:
-                    print(f"🔵❌ Failed to reset robot on first connection: {str(reset_error)}", flush=True)
+                    print(f"🔵❌ Failed to run wake-up gesture on task launch: {str(reset_error)}", flush=True)
                     logger.warning(
-                        "Failed to reset robot to rest position on first connection",
+                        "Failed to run wake-up gesture on task launch",
                         error=str(reset_error),
                         error_type=type(reset_error).__name__
                     )
@@ -585,8 +602,16 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                     model = task_request.input.get("model", "Qwen/Qwen3-32B")
                     
                     messages = [
-                        {"role": "system", "content": "You are a helpful DevOps assistant."},
-                        {"role": "user", "content": prompt}
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are Reachy, a friendly robot assistant. "
+                                "Reply in 1-2 short sentences. "
+                                "Be direct and demo-friendly. "
+                                "Do not mention DevOps, tools, logs, or infrastructure."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
                     ]
                     
                     print(f"🔵 Calling backend chat_completion...", flush=True)
@@ -597,7 +622,7 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                         max_tokens=1000
                     )
                     
-                    response_content = result["content"]
+                    response_content = _sanitize_response(result["content"])
                     aim_latency_ms = result["latency_ms"]
                     print(f"🔵✅ Backend inference completed: response_length={len(response_content) if response_content else 0}, latency_ms={aim_latency_ms}", flush=True)
                     
@@ -767,10 +792,15 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                     print(f"🔵 Audio: About to call speak() - is_mocked={audio_controller.is_mocked}, robot_available={audio_controller.robot is not None}, response_length={len(response_content)}", flush=True)
                     logger.info("Audio: About to call speak()", is_mocked=audio_controller.is_mocked, robot_available=audio_controller.robot is not None, response_length=len(response_content))
                     try:
+                        if reachy_driver.is_connected():
+                            await gesture_controller.raise_antennas()
+                            await gesture_controller.speaking_start_gesture()
                         print(f"🔵 Calling audio_controller.speak()...", flush=True)
                         speak_result = await audio_controller.speak(response_content)
                         print(f"🔵✅ Audio speak completed: success={speak_result}", flush=True)
                         logger.info("Audio: Speak completed", success=speak_result, text_length=len(response_content), is_mocked=audio_controller.is_mocked)
+                        if reachy_driver.is_connected():
+                            await gesture_controller.speaking_end_gesture()
                     except Exception as audio_error:
                         print(f"🔵❌ Audio speak failed: {str(audio_error)}", flush=True)
                         logger.error("Audio speak failed", error=str(audio_error), error_type=type(audio_error).__name__)
@@ -821,7 +851,7 @@ async def execute_task(task_id: str, task_request: TaskRequest):
 
 
 # Management API endpoints
-from app.config_manager import get_config, set_hardware_enabled, set_audio_enabled, is_hardware_enabled, is_audio_enabled
+from app.config_manager import get_config, set_hardware_enabled, set_audio_enabled, is_hardware_enabled, is_audio_enabled, get_serial_port
 import subprocess
 import signal
 
@@ -839,7 +869,8 @@ async def get_agent_config():
     return {
         "config_file": {
             "hardware_enabled": config_hardware_enabled,
-            "audio_enabled": config_audio_enabled
+            "audio_enabled": config_audio_enabled,
+            "serial_port": get_serial_port() or ""
         },
         "environment": {
             "REACHY_MOCKED": env_mocked if env_mocked else "not set",
@@ -849,7 +880,8 @@ async def get_agent_config():
             "current_mocked": reachy_driver.mocked,
             "driver_connected": reachy_driver.is_connected(),
             "hardware_enabled": not reachy_driver.mocked,
-            "audio_enabled": is_audio_enabled()
+            "audio_enabled": is_audio_enabled(),
+            "serial_port": get_serial_port() or ""
         }
     }
 
@@ -858,9 +890,41 @@ async def set_hardware_config(enabled: bool = Body(..., embed=False)):
     """Set hardware enabled state. Accepts raw boolean in JSON body."""
     try:
         set_hardware_enabled(enabled)
+        if not enabled and reachy_driver.is_connected():
+            try:
+                await gesture_controller.sleep_gesture()
+            except Exception as gesture_error:
+                logger.warning(
+                    "Failed to run sleep gesture on hardware disable",
+                    error=str(gesture_error),
+                    error_type=type(gesture_error).__name__,
+                )
+        elif not enabled and not reachy_driver.mocked:
+            try:
+                from app.daemon_manager import ensure_daemon_running, wait_for_zenoh_ready
+                ensure_daemon_running()
+                wait_for_zenoh_ready(timeout=6.0)
+                await reachy_driver.connect(force=True)
+                await gesture_controller.sleep_gesture()
+            except Exception as gesture_error:
+                logger.warning(
+                    "Failed to run sleep gesture after reconnect",
+                    error=str(gesture_error),
+                    error_type=type(gesture_error).__name__,
+                )
+        daemon_started = None
+        if enabled:
+            try:
+                from app.daemon_manager import ensure_daemon_running, wait_for_zenoh_ready
+                daemon_started = ensure_daemon_running()
+                if daemon_started:
+                    wait_for_zenoh_ready(timeout=8.0)
+            except Exception as daemon_error:
+                logger.warning("Failed to auto-start daemon after hardware enable", error=str(daemon_error))
         return {
             "success": True,
             "hardware_enabled": enabled,
+            "daemon_started": daemon_started,
             "message": f"Hardware {'enabled' if enabled else 'disabled'}. Call /v1/agent/reload to apply changes."
         }
     except Exception as e:
@@ -897,10 +961,10 @@ async def reload_config():
         env_audio_enabled = os.getenv("REACHY_AUDIO_ENABLED", "").lower()
         
         # Determine hardware state (config file takes precedence over env var)
-        if env_mocked and env_mocked not in ("false", "0", "no", "off"):
-            new_mocked = True
-        elif config_hardware_enabled:
+        if config_hardware_enabled:
             new_mocked = False
+        elif env_mocked and env_mocked not in ("false", "0", "no", "off"):
+            new_mocked = True
         else:
             new_mocked = True
         

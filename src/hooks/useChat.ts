@@ -168,10 +168,31 @@ export const useChat = ({
       });
       logger.log('Request payload:', request);
 
-      // Always route through Reachy agent for task execution
-      // The Reachy agent will then route to the appropriate backend (LM Studio, AIM, etc.)
-      const isReachyAgent = true; // Always use Reachy agent for task routing
+      // Prefer Reachy agent only when the robot is actually connected.
+      // Otherwise, fall back to direct chat completions for faster local usage.
       const reachyAgentUrl = 'http://localhost:9001'; // Reachy agent endpoint (fixed)
+      let isReachyAgent = false;
+      try {
+        const healthController = new AbortController();
+        const healthTimeoutId = setTimeout(() => healthController.abort(), 1200);
+        const healthResponse = await fetch(`${reachyAgentUrl}/v1/agent/health`, {
+          signal: healthController.signal,
+        });
+        clearTimeout(healthTimeoutId);
+        if (healthResponse.ok) {
+          const health = await healthResponse.json();
+          const hardwareConnected = Boolean(health?.sensors_ok || health?.actuators_ok);
+          // Use Reachy agent when it's reachable so it can attempt a hardware connection.
+          isReachyAgent = true;
+          logger.log('Reachy agent health check', { hardwareConnected, health });
+        } else {
+          logger.warn('Reachy agent health check failed', { status: healthResponse.status });
+        }
+      } catch (err) {
+        logger.warn('Reachy agent health check unavailable, using direct chat completion', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
       
       // Add timeout to prevent hanging requests (increased to 120 seconds for backend inference)
       const controller = new AbortController();

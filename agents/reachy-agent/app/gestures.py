@@ -93,19 +93,19 @@ class GestureController:
             from reachy_mini.utils import create_head_pose
             
             # Quick nod: look down more noticeably, then back up
-            # Using larger movement (z=-15mm) and longer duration for visibility
-            logger.debug("Executing ACK gesture movement", z=-15)
+            # Use a larger movement for better visibility on hardware.
+            logger.debug("Executing ACK gesture movement", z=-25)
             robot.goto_target(
-                head=create_head_pose(z=-15, roll=0, degrees=True, mm=True),
-                duration=0.4
+                head=create_head_pose(z=-25, roll=0, degrees=True, mm=True),
+                duration=0.5
             )
             logger.debug("ACK gesture movement command sent, waiting...")
-            await asyncio.sleep(0.5)  # Wait for movement to complete
+            await asyncio.sleep(0.6)  # Wait for movement to complete
             robot.goto_target(
                 head=create_head_pose(z=0, roll=0, degrees=True, mm=True),
-                duration=0.4
+                duration=0.5
             )
-            await asyncio.sleep(0.3)  # Wait for return movement
+            await asyncio.sleep(0.4)  # Wait for return movement
             
             logger.info("Gesture: ACK completed", gesture="ack")
         except Exception as e:
@@ -278,4 +278,176 @@ class GestureController:
             import traceback
             print(f"🔵❌ REST traceback: {traceback.format_exc()}", flush=True)
             logger.error("Failed to return to rest", error=str(e), error_type=type(e).__name__, traceback=traceback.format_exc())
+
+    async def wake_up_gesture(self) -> None:
+        """
+        Perform a wake-up gesture when the robot first connects.
+        Gesture: a visible head dip + gentle roll, returning to neutral.
+        """
+        print(f"🔵🔵🔵 wake_up_gesture() called - is_mocked={self.is_mocked}, driver_available={self.driver is not None}", flush=True)
+        if self.is_mocked:
+            print("🔵⚠️ WAKE gesture is MOCKED - will simulate", flush=True)
+            logger.info("Gesture: WAKE (mocked)", gesture="wake")
+            await asyncio.sleep(0.6)
+            return
+        
+        try:
+            robot = await self._get_robot()
+            if not robot:
+                logger.warning("Robot not available for WAKE gesture", driver_available=self.driver is not None, driver_connected=self.driver.is_connected() if self.driver else False)
+                return
+            
+            if hasattr(robot, "wake_up"):
+                # Make sure motors are enabled before wake sequence.
+                try:
+                    robot.enable_motors()
+                except Exception:
+                    pass
+                robot.wake_up()
+                # Ensure antennas are fully upright after wake.
+                try:
+                    from reachy_mini.reachy_mini import INIT_HEAD_POSE
+                    robot.goto_target(INIT_HEAD_POSE, antennas=[0.0, 0.0], duration=1.2)
+                except Exception:
+                    robot.goto_target(antennas=[0.0, 0.0], duration=1.0)
+                try:
+                    robot.set_target_antenna_joint_positions([0.0, 0.0])
+                except Exception:
+                    pass
+                await asyncio.sleep(0.9)
+                logger.info("Gesture: WAKE (wake_up + antennas_up)", gesture="wake")
+                return
+            
+            from reachy_mini.utils import create_head_pose
+            
+            # Dip down a bit, roll left/right, then return to neutral
+            robot.goto_target(
+                head=create_head_pose(z=-20, roll=0, degrees=True, mm=True),
+                duration=0.5
+            )
+            await asyncio.sleep(0.6)
+            robot.goto_target(
+                head=create_head_pose(z=-10, roll=15, degrees=True, mm=True),
+                duration=0.5
+            )
+            await asyncio.sleep(0.5)
+            robot.goto_target(
+                head=create_head_pose(z=-10, roll=-15, degrees=True, mm=True),
+                duration=0.5
+            )
+            await asyncio.sleep(0.5)
+            robot.goto_target(
+                head=create_head_pose(z=0, roll=0, degrees=True, mm=True),
+                duration=0.6
+            )
+            await asyncio.sleep(0.6)
+            try:
+                robot.set_target_antenna_joint_positions([0.0, 0.0])
+            except Exception:
+                pass
+            await asyncio.sleep(0.4)
+            logger.info("Gesture: WAKE (fallback)", gesture="wake")
+        except Exception as e:
+            logger.error("Failed to execute WAKE gesture", error=str(e), error_type=type(e).__name__)
+
+    async def speaking_start_gesture(self) -> None:
+        """Tilt head slightly to indicate speech has started."""
+        if self.is_mocked:
+            logger.info("Gesture: SPEAK_START (mocked)", gesture="speak_start")
+            await asyncio.sleep(0.2)
+            return
+        
+        try:
+            robot = await self._get_robot()
+            if not robot:
+                logger.warning("Robot not available for SPEAK_START gesture")
+                return
+            
+            from reachy_mini.utils import create_head_pose
+            robot.goto_target(
+                head=create_head_pose(z=-8, roll=12, degrees=True, mm=True),
+                duration=0.4
+            )
+            await asyncio.sleep(0.4)
+            logger.info("Gesture: SPEAK_START", gesture="speak_start")
+        except Exception as e:
+            logger.error("Failed to execute SPEAK_START gesture", error=str(e), error_type=type(e).__name__)
+
+    async def raise_antennas(self) -> None:
+        """Raise antennas to signal a response is ready."""
+        if self.is_mocked:
+            logger.info("Gesture: ANTENNAS_UP (mocked)", gesture="antennas_up")
+            await asyncio.sleep(0.2)
+            return
+        
+        try:
+            robot = await self._get_robot()
+            if not robot:
+                logger.warning("Robot not available for ANTENNAS_UP gesture")
+                return
+            try:
+                robot.enable_motors()
+            except Exception:
+                pass
+            robot.set_target_antenna_joint_positions([0.0, 0.0])
+            await asyncio.sleep(0.5)
+            logger.info("Gesture: ANTENNAS_UP", gesture="antennas_up")
+        except Exception as e:
+            logger.error("Failed to execute ANTENNAS_UP gesture", error=str(e), error_type=type(e).__name__)
+
+    async def speaking_end_gesture(self) -> None:
+        """Return head to neutral after speech completes."""
+        if self.is_mocked:
+            logger.info("Gesture: SPEAK_END (mocked)", gesture="speak_end")
+            await asyncio.sleep(0.2)
+            return
+        
+        try:
+            robot = await self._get_robot()
+            if not robot:
+                logger.warning("Robot not available for SPEAK_END gesture")
+                return
+            
+            from reachy_mini.utils import create_head_pose
+            robot.goto_target(
+                head=create_head_pose(z=0, roll=0, degrees=True, mm=True),
+                duration=0.5
+            )
+            await asyncio.sleep(0.5)
+            logger.info("Gesture: SPEAK_END", gesture="speak_end")
+        except Exception as e:
+            logger.error("Failed to execute SPEAK_END gesture", error=str(e), error_type=type(e).__name__)
+
+    async def sleep_gesture(self) -> None:
+        """Put the robot back to a calm rest pose when hardware is turned off."""
+        if self.is_mocked:
+            logger.info("Gesture: SLEEP (mocked)", gesture="sleep")
+            await asyncio.sleep(0.4)
+            return
+        
+        try:
+            robot = await self._get_robot()
+            if not robot:
+                logger.warning("Robot not available for SLEEP gesture")
+                return
+            if hasattr(robot, "goto_sleep"):
+                robot.goto_sleep()
+                logger.info("Gesture: SLEEP (goto_sleep)", gesture="sleep")
+                return
+            
+            from reachy_mini.utils import create_head_pose
+            # Fallback: slow, gentle dip to indicate sleep/standby.
+            robot.goto_target(
+                head=create_head_pose(z=-18, roll=0, degrees=True, mm=True),
+                duration=0.8
+            )
+            await asyncio.sleep(0.9)
+            robot.goto_target(
+                head=create_head_pose(z=0, roll=0, degrees=True, mm=True),
+                duration=0.8
+            )
+            await asyncio.sleep(0.8)
+            logger.info("Gesture: SLEEP (fallback)", gesture="sleep")
+        except Exception as e:
+            logger.error("Failed to execute SLEEP gesture", error=str(e), error_type=type(e).__name__)
 
