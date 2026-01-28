@@ -225,18 +225,9 @@ from .reachy_driver import ReachyDriver
 # Check config file first, then environment variable
 from app.config_manager import is_hardware_enabled, is_audio_enabled
 
-# Priority: config file > environment variable > default
+# Priority: config file drives hardware state (UI toggle wins).
 config_hardware_enabled = is_hardware_enabled()
-env_mocked = os.getenv("REACHY_MOCKED", "").lower()
-if env_mocked and env_mocked not in ("false", "0", "no", "off"):
-    # Environment variable explicitly set, use it
-    reachy_mocked = True
-elif config_hardware_enabled:
-    # Config says hardware enabled
-    reachy_mocked = False
-else:
-    # Default: hardware disabled for safety
-    reachy_mocked = True
+reachy_mocked = not config_hardware_enabled
 
 reachy_driver = ReachyDriver(mocked=reachy_mocked)
 gesture_controller = GestureController(driver=reachy_driver if not reachy_driver.mocked else None)
@@ -254,7 +245,14 @@ else:
 # Initialize audio controller
 from app.audio import AudioController
 # Initialize with is_mocked=False so it can use PulseAudio even if robot connection fails
-audio_controller = AudioController(robot=None, is_mocked=False)  # Will be set when robot connects
+# Use a higher default volume for demos.
+audio_controller = AudioController(
+    robot=None,
+    is_mocked=False,
+    audio_volume=200,
+    force_pulse=True,
+    prefer_alsa=False,
+)  # Will be set when robot connects
 
 # Note: Connection to hardware will happen on first use
 # The driver will attempt to connect when gestures are executed
@@ -548,6 +546,7 @@ async def execute_task(task_id: str, task_request: TaskRequest):
             response_content = ""
             stream_response = bool(task_request.input.get("stream_response", True))
             streaming_speech = False
+            wake_up_scheduled = False
             
             try:
                 print(f"🔵 About to call backend: backend={backend}, base_url={base_url}, model={task_request.input.get('model', 'default')}, prompt_length={len(prompt)}", flush=True)
@@ -568,6 +567,26 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                         {"role": "user", "content": prompt},
                     ]
                     
+                    async def schedule_wake_up_gesture() -> None:
+                        nonlocal wake_up_scheduled
+                        if wake_up_scheduled or reachy_driver.mocked:
+                            return
+                        wake_up_scheduled = True
+
+                        async def _run_wake() -> None:
+                            try:
+                                if not reachy_driver.is_connected():
+                                    await reachy_driver.connect(force=True)
+                                if reachy_driver.is_connected():
+                                    await gesture_controller.wake_up_gesture()
+                                    logger.info("Wake-up gesture completed after response started")
+                                else:
+                                    logger.warning("Wake-up gesture skipped (driver not connected)")
+                            except Exception as wake_error:
+                                logger.warning("Wake-up gesture failed", error=str(wake_error), error_type=type(wake_error).__name__)
+
+                        asyncio.create_task(_run_wake())
+
                     if stream_response:
                         print("🔵 Calling backend chat_completion_stream...", flush=True)
                         stream_start = time.time()
@@ -638,6 +657,8 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                             temperature=0.7,
                             max_tokens=1000
                         ):
+                            if chunk and not wake_up_scheduled:
+                                await schedule_wake_up_gesture()
                             response_content += chunk
                             tasks[task_id].result = {"content": response_content, "prompt": prompt}
                             tasks[task_id].updated_at = datetime.now(timezone.utc)
@@ -673,6 +694,8 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                         response_content = _sanitize_response(result["content"])
                         aim_latency_ms = result["latency_ms"]
                         print(f"🔵✅ Backend inference completed: response_length={len(response_content) if response_content else 0}, latency_ms={aim_latency_ms}", flush=True)
+                        if response_content:
+                            await schedule_wake_up_gesture()
                     
                     # Do not wait on thinking gesture; keep response latency low.
                     if thinking_task:
@@ -880,7 +903,15 @@ async def execute_task(task_id: str, task_request: TaskRequest):
 
 
 # Management API endpoints
-from app.config_manager import get_config, set_hardware_enabled, set_audio_enabled, is_hardware_enabled, is_audio_enabled, get_serial_port
+from app.config_manager import (
+    get_config,
+    set_hardware_enabled,
+    set_audio_enabled,
+    is_hardware_enabled,
+    is_audio_enabled,
+    get_serial_port,
+    set_serial_port,
+)
 import subprocess
 import signal
 
@@ -969,6 +1000,25 @@ async def set_audio_config(enabled: bool = Body(..., embed=False)):
             "audio_enabled": enabled,
             "message": f"Audio {'enabled' if enabled else 'disabled'}. Restart agent to apply changes."
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/agent/config/serial_port")
+async def set_serial_port_config(port: str = Body(..., embed=False)):
+    """Set Reachy serial port used by the daemon."""
+    try:
+        normalized = port.strip()
+        if not normalized:
+            raise HTTPException(status_code=400, detail="serial_port cannot be empty")
+        set_serial_port(normalized)
+        return {
+            "success": True,
+            "serial_port": normalized,
+            "message": "Serial port updated. Call /v1/agent/reload to apply changes."
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

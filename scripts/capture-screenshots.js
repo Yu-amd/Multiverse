@@ -35,7 +35,11 @@ async function captureScreenshots() {
   try {
     // Navigate to app
     await page.goto(appUrl, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForSelector('.app-container', { timeout: 10000 });
+    await Promise.race([
+      page.waitForSelector('.app-container', { timeout: 20000 }),
+      page.waitForSelector('#root', { timeout: 20000 }),
+      page.waitForSelector('main', { timeout: 20000 })
+    ]);
 
     // Wait a bit for everything to render
     await page.waitForTimeout(2000);
@@ -57,7 +61,11 @@ async function captureScreenshots() {
       localStorage.setItem('force-rog-ally', 'true');
     });
     await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('.app-container', { timeout: 10000 });
+    await Promise.race([
+      page.waitForSelector('.app-container', { timeout: 20000 }),
+      page.waitForSelector('#root', { timeout: 20000 }),
+      page.waitForSelector('main', { timeout: 20000 })
+    ]);
     await page.waitForTimeout(2000);
     await page.screenshot({
       path: join(screenshotsDir, 'rog-ally-x.png'),
@@ -72,7 +80,11 @@ async function captureScreenshots() {
       localStorage.removeItem('force-rog-ally');
     });
     await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('.app-container', { timeout: 10000 });
+    await Promise.race([
+      page.waitForSelector('.app-container', { timeout: 20000 }),
+      page.waitForSelector('#root', { timeout: 20000 }),
+      page.waitForSelector('main', { timeout: 20000 })
+    ]);
     await page.waitForTimeout(2000);
     await page.screenshot({
       path: join(screenshotsDir, 'mobile.png'),
@@ -84,7 +96,11 @@ async function captureScreenshots() {
     console.log('📸 Capturing tablet layout...');
     await page.setViewportSize({ width: 768, height: 1024 });
     await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('.app-container', { timeout: 10000 });
+    await Promise.race([
+      page.waitForSelector('.app-container', { timeout: 20000 }),
+      page.waitForSelector('#root', { timeout: 20000 }),
+      page.waitForSelector('main', { timeout: 20000 })
+    ]);
     await page.waitForTimeout(2000);
     await page.screenshot({
       path: join(screenshotsDir, 'tablet.png'),
@@ -96,7 +112,11 @@ async function captureScreenshots() {
     console.log('📸 Capturing settings modal...');
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('.app-container', { timeout: 10000 });
+    await Promise.race([
+      page.waitForSelector('.app-container', { timeout: 20000 }),
+      page.waitForSelector('#root', { timeout: 20000 }),
+      page.waitForSelector('main', { timeout: 20000 })
+    ]);
     await page.locator('button', { hasText: 'Settings' }).click();
     await page.waitForTimeout(1000); // Wait for modal to fully render
     await page.screenshot({

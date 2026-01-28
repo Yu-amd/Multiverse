@@ -37,9 +37,10 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
   const [selectedTask, setSelectedTask] = useState<'chat' | 'so101' | 'so101-camera' | null>(null);
   const [showChatTask, setShowChatTask] = useState(false);
   const [chatRunning, setChatRunning] = useState(false);
-  const safeMessages: Message[] = props.messages ?? [];
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
+  const safeMessages: Message[] = props.messages ?? localMessages;
   const safeSetMessages: React.Dispatch<React.SetStateAction<Message[]>> =
-    props.setMessages ?? (() => {});
+    props.setMessages ?? setLocalMessages;
   const safeShowToast = props.showToast ?? (() => {});
   const safeRecordMetrics = props.recordMetrics ?? (() => {});
   const safeRecordError = props.recordError ?? (() => {});

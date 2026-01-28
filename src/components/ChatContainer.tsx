@@ -363,7 +363,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
           messages={messages}
           renderMessage={(message, index) => {
             const isEditing = editingMessageId === message.id;
-            const isError = message.content.startsWith('Error:');
+            const content = typeof message.content === 'string' ? message.content : '';
+            const safeTimestamp =
+              message.timestamp instanceof Date
+                ? message.timestamp
+                : new Date(message.timestamp ?? Date.now());
+            const isError = content.startsWith('Error:');
             const canRetry = isError && lastError?.messageId === message.id && lastError.error.retryable;
             const errorInfo = canRetry ? lastError.error : null;
             
@@ -382,7 +387,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                   }}>
                     {showTimestamps && (
                       <span>
-                        {message.timestamp.toLocaleString()}
+                        {safeTimestamp.toLocaleString()}
                         {message.edited && (
                           <span style={{ marginLeft: '4px', fontSize: '0.7rem', fontStyle: 'italic' }}>
                             (edited)
@@ -488,7 +493,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 ) : (
                   <>
                     <div 
-                      dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
                       style={{ 
                         wordBreak: 'break-word',
                         lineHeight: '1.5'

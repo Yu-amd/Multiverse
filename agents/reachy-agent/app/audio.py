@@ -41,15 +41,25 @@ class AudioController:
     Uses PulseAudio (paplay) for reliable audio routing, matching the working implementation.
     """
     
-    def __init__(self, robot=None, audio_device: Optional[str] = None, audio_volume: int = 100, is_mocked: Optional[bool] = None):
+    def __init__(
+        self,
+        robot=None,
+        audio_device: Optional[str] = None,
+        audio_volume: int = 200,
+        is_mocked: Optional[bool] = None,
+        force_pulse: bool = False,
+        prefer_alsa: bool = True,
+    ):
         """
         Initialize audio controller.
         
         Args:
             robot: ReachyMini instance (None for mocked mode)
             audio_device: Explicit ALSA device (e.g., "hw:4,0") or None for auto-detection
-            audio_volume: Volume percentage (0-200), default 100
+            audio_volume: Volume percentage (0-200), default 200
             is_mocked: Explicitly set mocked mode. If None, defaults to robot is None
+            force_pulse: Force PulseAudio playback even if robot media API is available
+            prefer_alsa: Prefer direct ALSA playback when a device is detected
         """
         self.robot = robot
         # Allow explicit control of mocked mode - if not set, default to robot is None
@@ -60,6 +70,8 @@ class AudioController:
         self._audio_device_detected: Optional[str] = None
         self._audio_volume: int = max(0, min(200, audio_volume))  # Clamp to 0-200
         self._edge_tts_voice: Optional[str] = None  # Edge TTS voice name
+        self._force_pulse: bool = force_pulse
+        self._prefer_alsa: bool = prefer_alsa
         
         # Always create temp directory - we need it for audio generation even without robot
         self._temp_dir = tempfile.mkdtemp(prefix="reachy_audio_")
@@ -67,7 +79,14 @@ class AudioController:
         if self.is_mocked:
             logger.info("Audio controller initialized in MOCKED mode")
         else:
-            logger.info("Audio controller initialized for real hardware", audio_device=audio_device, audio_volume=audio_volume, robot_available=robot is not None)
+            logger.info(
+                "Audio controller initialized for real hardware",
+                audio_device=audio_device,
+                audio_volume=audio_volume,
+                robot_available=robot is not None,
+                force_pulse=force_pulse,
+                prefer_alsa=prefer_alsa,
+            )
     
     def _detect_audio_device(self) -> Optional[str]:
         """Detect Reachy Mini audio device by looking for USB audio devices.
@@ -84,6 +103,9 @@ class AudioController:
             # Return cached detection result
             return self._audio_device_detected
         
+        pulse_device: Optional[str] = None
+        alsa_device: Optional[str] = None
+
         # Try PulseAudio first (works with PipeWire)
         try:
             result = subprocess.run(
@@ -103,13 +125,12 @@ class AudioController:
                             sink_name_lower = sink_name.lower()
                             # Look for Reachy or USB in sink name
                             # Also check for "Pollen" (Reachy Mini manufacturer name)
-                            if ('reachy' in sink_name_lower or 'pollen' in sink_name_lower or 
+                            if ('reachy' in sink_name_lower or 'pollen' in sink_name_lower or
                                 ('usb' in sink_name_lower and 'audio' in sink_name_lower)):
                                 # Use PulseAudio sink name (stable across restarts)
-                                device_str = f"pulse:{sink_name}"
+                                pulse_device = f"pulse:{sink_name}"
                                 logger.info(f"✓ Detected Reachy Mini audio device (PulseAudio): {sink_name}")
-                                self._audio_device_detected = device_str
-                                return device_str
+                                break
         except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
             pass
         
@@ -148,9 +169,16 @@ class AudioController:
                         
                         device_str = f"hw:{card_num},{device_num}"
                         logger.info(f"✓ Detected Reachy Mini audio device (ALSA): {device_str} ({line.strip()})")
-                        self._audio_device_detected = device_str
-                        return device_str
+                        alsa_device = device_str
+                        break
             
+            if self._prefer_alsa and alsa_device:
+                self._audio_device_detected = alsa_device
+                return alsa_device
+            if pulse_device:
+                self._audio_device_detected = pulse_device
+                return pulse_device
+
             # If no USB/Reachy device found, return None (use default)
             logger.debug("No Reachy Mini audio device detected, using system default")
             self._audio_device_detected = None
@@ -160,6 +188,83 @@ class AudioController:
             logger.debug(f"Audio device detection failed: {e}")
             self._audio_device_detected = None
             return None
+
+    def _get_reachy_sink_name(self) -> Optional[str]:
+        """Return Reachy/Pollen PulseAudio sink name if available."""
+        try:
+            result = subprocess.run(
+                ['pactl', 'list', 'sinks', 'short'],
+                capture_output=True,
+                text=True,
+                timeout=2.0
+            )
+            if result.returncode != 0:
+                return None
+            for line in result.stdout.split('\n'):
+                line_lower = line.lower()
+                if 'reachy' in line_lower or 'pollen' in line_lower:
+                    parts = line.split('\t')
+                    if len(parts) >= 2:
+                        return parts[1]
+        except Exception:
+            return None
+        return None
+
+    async def _play_with_pw_play(self, audio_file: str, sink_name: Optional[str]) -> bool:
+        """Play audio via PipeWire (pw-play), targeting a sink if provided."""
+        try:
+            play_cmd = ['pw-play']
+            if sink_name:
+                play_cmd += ['--target', sink_name]
+            play_cmd.append(audio_file)
+            play_proc = await asyncio.create_subprocess_exec(
+                *play_cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            await asyncio.wait_for(play_proc.wait(), timeout=60.0)
+            return play_proc.returncode == 0
+        except Exception:
+            return False
+
+    def _ensure_reachy_audio_profile(self) -> None:
+        """Force Reachy Mini audio card to use analog output (S/PDIF is silent)."""
+        try:
+            result = subprocess.run(
+                ['pactl', 'list', 'short', 'cards'],
+                capture_output=True,
+                text=True,
+                timeout=2.0
+            )
+            if result.returncode != 0:
+                return
+            card_name = None
+            for line in result.stdout.splitlines():
+                parts = line.split('\t')
+                if len(parts) >= 2:
+                    name = parts[1]
+                    if 'Reachy_Mini_Audio' in name or 'Pollen_Robotics' in name:
+                        card_name = name
+                        break
+            if not card_name:
+                return
+            subprocess.run(
+                ['pactl', 'set-card-profile', card_name, 'output:analog-stereo'],
+                check=False,
+                timeout=2.0
+            )
+            subprocess.run(
+                [
+                    'pactl',
+                    'set-sink-port',
+                    'alsa_output.usb-Pollen_Robotics_Reachy_Mini_Audio_100025004254700534-00.analog-stereo',
+                    'analog-output',
+                ],
+                check=False,
+                timeout=2.0
+            )
+        except Exception:
+            pass
     
     def _set_audio_volume(self, sink_id: Optional[str] = None) -> None:
         """Set audio volume for the Reachy Mini speaker.
@@ -170,6 +275,7 @@ class AudioController:
         Args:
             sink_id: PulseAudio sink name (for fallback). If None, will try to auto-detect.
         """
+        self._ensure_reachy_audio_profile()
         if self._audio_volume == 100:
             return  # No need to set volume if it's already at 100%
         
@@ -250,6 +356,7 @@ class AudioController:
 
     def _ensure_pulse_sink(self, sink_name: Optional[str]) -> None:
         """Ensure PulseAudio uses the intended sink and is unmuted."""
+        self._ensure_reachy_audio_profile()
         if not sink_name:
             return
         try:
@@ -312,8 +419,11 @@ class AudioController:
             
             logger.info("Audio: Generated audio file", file=audio_file, file_size=os.path.getsize(audio_file))
 
-            # If robot media API is available, try it first (more reliable on Reachy Mini).
-            if self.robot is not None and hasattr(self.robot, "media") and hasattr(self.robot.media, "play_sound"):
+            # If robot media API is available, try it first unless PulseAudio is forced.
+            if self._force_pulse:
+                logger.info("Audio: Forcing PulseAudio playback", robot_available=self.robot is not None)
+            if (not self._force_pulse and self.robot is not None and
+                    hasattr(self.robot, "media") and hasattr(self.robot.media, "play_sound")):
                 try:
                     loop = asyncio.get_event_loop()
                     logger.info("Audio: Attempting robot media playback", file=audio_file)
@@ -369,32 +479,14 @@ class AudioController:
                     # Use sink name if available, otherwise use index
                     play_cmd = ['paplay', '--device', sink_name or sink_id, audio_file]
                 elif audio_device and audio_device.startswith('hw:'):
-                    # Route through PulseAudio - find Reachy Mini sink by name
-                    try:
-                        result = subprocess.run(
-                            ['pactl', 'list', 'sinks', 'short'],
-                            capture_output=True,
-                            text=True,
-                            timeout=2.0
-                        )
-                        if result.returncode == 0:
-                            for line in result.stdout.split('\n'):
-                                line_lower = line.lower()
-                                if 'reachy' in line_lower or 'pollen' in line_lower:
-                                    parts = line.split('\t')
-                                    if len(parts) >= 2:
-                                        sink_name = parts[1]
-                                        sink_id = parts[0]
-                                        break
-                    except Exception:
-                        pass
-                    if sink_name:
-                        self._set_audio_volume(sink_name)
-                        self._ensure_pulse_sink(sink_name)
-                        play_cmd = ['paplay', '--device', sink_name, audio_file]
+                    # Direct ALSA playback (bypass PipeWire/PulseAudio)
+                    reachy_sink = self._get_reachy_sink_name()
+                    if reachy_sink:
+                        self._set_audio_volume(reachy_sink)
+                        self._ensure_pulse_sink(reachy_sink)
                     else:
-                        play_cmd = ['paplay', audio_file]  # Will use default sink
                         self._set_audio_volume(None)
+                    play_cmd = ['aplay', '-D', audio_device, audio_file]
                 else:
                     # No device detected, try to find Reachy Mini sink by name
                     try:
@@ -448,6 +540,12 @@ class AudioController:
                         return True
                     else:
                         logger.warning("Audio playback failed", returncode=play_proc.returncode, device=audio_device)
+                        # If ALSA device is busy, fall back to PipeWire (pw-play).
+                        if audio_device and audio_device.startswith('hw:'):
+                            reachy_sink = self._get_reachy_sink_name()
+                            if await self._play_with_pw_play(audio_file, reachy_sink):
+                                logger.info("Audio: Successfully played via pw-play", device=reachy_sink or "default")
+                                return True
                         # Retry once with fresh sink detection
                         audio_device = self._detect_audio_device()
                         if audio_device:

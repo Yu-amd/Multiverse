@@ -119,6 +119,25 @@ class ReachyDriver:
             error_str = str(e)
             error_type = type(e).__name__
             
+            # If we hit a timeout, try restarting the daemon/Zenoh once and retry.
+            if "timeout" in error_str.lower():
+                try:
+                    from app.daemon_manager import ensure_daemon_running, wait_for_zenoh_ready
+                    ensure_daemon_running()
+                    wait_for_zenoh_ready(timeout=8.0)
+                    self.robot = ReachyMini()
+                    if self.robot is not None:
+                        self.connected = True
+                        self._connection_failed = False
+                        logger.info("Reachy driver connected after daemon restart", robot_type=type(self.robot).__name__)
+                        return True
+                except Exception as retry_error:
+                    logger.warning(
+                        "Reachy driver retry after daemon restart failed",
+                        error=str(retry_error),
+                        error_type=type(retry_error).__name__,
+                    )
+            
             # Special handling for "Camera not found" - this is often non-fatal
             # The robot may still be accessible for gestures/audio via Zenoh
             if "Camera not found" in error_str or "camera" in error_str.lower():

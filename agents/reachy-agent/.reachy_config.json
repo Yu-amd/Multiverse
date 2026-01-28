@@ -1,5 +1,5 @@
 {
   "hardware_enabled": false,
   "audio_enabled": true,
-  "serial_port": "/dev/ttyACM1"
+  "serial_port": "/dev/ttyACM2"
 }
