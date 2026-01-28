@@ -12,11 +12,11 @@ export const ModelsPage: React.FC = () => {
   const { profiles, createProfile, deleteProfile, getProfile } = useProfiles();
   const { showToast } = useToast();
   
-  const { selectedModel, customEndpoint, apiKey, temperature, maxTokens, topP } = settings;
+  const { selectedModel, customEndpoint, apiKey, temperature, maxTokens, topP, aimModelId, thinkingGestureEnabled } = settings;
   
   const [endpointHealth, setEndpointHealth] = useState<EndpointHealth | null>(null);
   const [isProbing, setIsProbing] = useState(false);
-  const [selectedAimModelId, setSelectedAimModelId] = useState<string | null>(null);
+  const [selectedAimModelId, setSelectedAimModelId] = useState<string>('');
   
   // Profile management
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
@@ -60,17 +60,24 @@ export const ModelsPage: React.FC = () => {
     // Auto-update endpoint based on selection
     if (newModel === 'Ollama (Local)') {
       updateSettings({ customEndpoint: 'http://localhost:11434' });
-      setSelectedAimModelId(null);
+      setSelectedAimModelId('');
+      updateSettings({ aimModelId: '' });
     } else if (newModel === 'LM Studio (Local)') {
       updateSettings({ customEndpoint: 'http://localhost:1234' });
-      setSelectedAimModelId(null);
+      setSelectedAimModelId('');
+      updateSettings({ aimModelId: '' });
     } else if (newModel === 'AMD Inference Microservice (AIM)') {
       updateSettings({ customEndpoint: 'https://aim.<cluster-domain>/v1' });
-      setSelectedAimModelId(null);
+      setSelectedAimModelId('');
     } else {
-      setSelectedAimModelId(null);
+      setSelectedAimModelId('');
+      updateSettings({ aimModelId: '' });
     }
   };
+
+  useEffect(() => {
+    setSelectedAimModelId(aimModelId || '');
+  }, [aimModelId]);
 
   // Profile handlers
   const handleCreateProfile = () => {
@@ -159,24 +166,27 @@ export const ModelsPage: React.FC = () => {
                 value={selectedAimModelId || ''}
                 onChange={(e) => {
                   const modelId = e.target.value;
-                  setSelectedAimModelId(modelId || null);
+                  setSelectedAimModelId(modelId || '');
                   if (modelId) {
                     const model = AIM_CATALOG_MODELS.find(m => m.id === modelId);
+                    updateSettings({ aimModelId: modelId });
                     if (model) {
                       showToast(`Selected ${model.name}`, 'success');
                     }
+                  } else {
+                    updateSettings({ aimModelId: '' });
                   }
                 }}
               >
                 <option value="">-- Select an AIM model --</option>
                 {AIM_CATALOG_MODELS.map(model => (
-                  <option key={model.id} value={model.id}>
+                  <option key={model.id} value={model.modelId}>
                     {model.name} ({model.organization}) - {model.parameters}
                   </option>
                 ))}
               </select>
               {selectedAimModelId && (() => {
-                const selectedModel = AIM_CATALOG_MODELS.find(m => m.id === selectedAimModelId);
+                const selectedModel = AIM_CATALOG_MODELS.find(m => m.modelId === selectedAimModelId);
                 return selectedModel ? (
                   <div className="form-help aim-model-info">
                     <div><strong>Model ID:</strong> {selectedModel.modelId}</div>
@@ -189,6 +199,19 @@ export const ModelsPage: React.FC = () => {
                   </div>
                 ) : null;
               })()}
+              <label className="form-label" style={{ marginTop: '0.75rem' }}>Reachy Thinking Gesture</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={thinkingGestureEnabled}
+                  onChange={(e) => updateSettings({ thinkingGestureEnabled: e.target.checked })}
+                  style={{ transform: 'scale(1.1)' }}
+                />
+                <span>Enable thinking gesture during inference</span>
+              </label>
+              <div className="form-help">
+                Disable for faster, quieter demos (recommended for GPT‑OSS).
+              </div>
             </div>
           )}
 

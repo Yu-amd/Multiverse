@@ -168,14 +168,11 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
               </div>
               
               <div className="metric-card" style={{ position: 'relative' }}>
-                <HintIcon text="Token Throughput: Tokens/sec = real-time calculation from API response (responseLength / (totalTime / 1000)). Tokens in/out = real-time token counts from API request/response" />
+                <HintIcon text="Token Throughput: Tokens/sec = real-time calculation from API response (responseLength / (totalTime / 1000))." />
                 <h4 className="metric-title" style={{ fontSize: isROGAllyX ? '1.3rem' : '1rem' }}>🔹 Token Throughput</h4>
                 <div className="metric-value" style={{ fontSize: isROGAllyX ? '1.1rem' : '0.9rem' }}>
                   <div>
                     Tokens/sec: <span className="value">{modelMetrics.tokensPerSecond.toFixed(1)} t/s</span>
-                  </div>
-                  <div>
-                    Tokens in/out: <span className="value">{modelMetrics.tokensIn} / {modelMetrics.tokensOut}</span>
                   </div>
                 </div>
               </div>
@@ -237,18 +234,6 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Avg Tokens/Second</div>
                     <div className="value" style={{ fontSize: isROGAllyX ? '1.1rem' : '1rem', fontWeight: 600 }}>
                       {sessionMetrics.averageTokensPerSecond.toFixed(1)} tok/s
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Total Tokens In</div>
-                    <div className="value" style={{ fontSize: isROGAllyX ? '1.1rem' : '1rem', fontWeight: 600 }}>
-                      {sessionMetrics.totalTokensIn}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Total Tokens Out</div>
-                    <div className="value" style={{ fontSize: isROGAllyX ? '1.1rem' : '1rem', fontWeight: 600 }}>
-                      {sessionMetrics.totalTokensOut}
                     </div>
                   </div>
                   <div>

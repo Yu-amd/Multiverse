@@ -16,6 +16,8 @@ export interface SessionData {
     temperature: number;
     maxTokens: number;
     topP: number;
+    aimModelId?: string;
+    thinkingGestureEnabled?: boolean;
   };
   timestamp: number;
 }
@@ -36,6 +38,8 @@ export function saveCurrentSession(
     temperature: number;
     maxTokens: number;
     topP: number;
+    aimModelId?: string;
+    thinkingGestureEnabled?: boolean;
   }
 ): void {
   try {
@@ -88,6 +92,8 @@ export function saveToHistory(
     temperature: number;
     maxTokens: number;
     topP: number;
+    aimModelId?: string;
+    thinkingGestureEnabled?: boolean;
   }
 ): void {
   try {

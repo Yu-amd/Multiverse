@@ -247,6 +247,26 @@ class AudioController:
                         pass
         except Exception as vol_error:
             logger.warning(f"⚠ Could not set audio volume via PulseAudio: {vol_error}")
+
+    def _ensure_pulse_sink(self, sink_name: Optional[str]) -> None:
+        """Ensure PulseAudio uses the intended sink and is unmuted."""
+        if not sink_name:
+            return
+        try:
+            subprocess.run(
+                ["pactl", "set-default-sink", sink_name],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+            )
+            subprocess.run(
+                ["pactl", "set-sink-mute", sink_name, "0"],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+            )
+        except Exception as e:
+            logger.debug("Could not ensure PulseAudio sink", error=str(e), sink=sink_name)
     
     async def speak(self, text: str) -> bool:
         """
@@ -291,6 +311,24 @@ class AudioController:
                 return False
             
             logger.info("Audio: Generated audio file", file=audio_file, file_size=os.path.getsize(audio_file))
+
+            # If robot media API is available, try it first (more reliable on Reachy Mini).
+            if self.robot is not None and hasattr(self.robot, "media") and hasattr(self.robot.media, "play_sound"):
+                try:
+                    loop = asyncio.get_event_loop()
+                    logger.info("Audio: Attempting robot media playback", file=audio_file)
+                    await asyncio.wait_for(
+                        loop.run_in_executor(None, self.robot.media.play_sound, audio_file),
+                        timeout=60.0,
+                    )
+                    logger.info("Audio: Robot media playback completed")
+                    return True
+                except Exception as media_error:
+                    logger.warning(
+                        "Audio: Robot media playback failed, falling back to PulseAudio",
+                        error=str(media_error),
+                        error_type=type(media_error).__name__,
+                    )
             
             # Detect audio device (PulseAudio first, then ALSA fallback)
             audio_device = self._detect_audio_device()
@@ -327,6 +365,7 @@ class AudioController:
                     else:
                         sink_name = sink_id
                     self._set_audio_volume(sink_name or sink_id)
+                    self._ensure_pulse_sink(sink_name or sink_id)
                     # Use sink name if available, otherwise use index
                     play_cmd = ['paplay', '--device', sink_name or sink_id, audio_file]
                 elif audio_device and audio_device.startswith('hw:'):
@@ -351,6 +390,7 @@ class AudioController:
                         pass
                     if sink_name:
                         self._set_audio_volume(sink_name)
+                        self._ensure_pulse_sink(sink_name)
                         play_cmd = ['paplay', '--device', sink_name, audio_file]
                     else:
                         play_cmd = ['paplay', audio_file]  # Will use default sink
@@ -377,6 +417,7 @@ class AudioController:
                         pass
                     if sink_name:
                         self._set_audio_volume(sink_name)
+                        self._ensure_pulse_sink(sink_name)
                         play_cmd = ['paplay', '--device', sink_name, audio_file]
                     else:
                         play_cmd = ['paplay', audio_file]
@@ -384,6 +425,8 @@ class AudioController:
                 
                 # Play audio (suppress ALSA/JACK errors)
                 audio_env = {**os.environ, 'ALSA_CARD': '0', 'JACK_NO_AUDIO_RESERVATION': '1'}
+                if sink_name or sink_id:
+                    audio_env["PULSE_SINK"] = sink_name or sink_id
                 
                 logger.info("Playing audio via PulseAudio", device=audio_device, command=' '.join(play_cmd))
                 

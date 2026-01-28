@@ -633,8 +633,6 @@ export const RunsPage: React.FC = () => {
           { label: 'Rate Limited', value: `${requestRateLimited}` },
           { label: 'Avg TTFT', value: ttft !== null ? `${ttft.toFixed(0)} ms` : '--' },
           { label: 'Avg Total Latency', value: totalLatency !== null ? `${totalLatency.toFixed(0)} ms` : '--' },
-          { label: 'Tokens In', value: `${sumSamples('llm_tokens_in_total')}` },
-          { label: 'Tokens Out', value: `${sumSamples('llm_tokens_out_total')}` },
         ],
         taskBreakdown: buildTaskBreakdown(effectiveRobotId),
       };

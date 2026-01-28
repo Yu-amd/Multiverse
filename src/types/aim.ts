@@ -6,7 +6,7 @@
 export type AimModelStatus = 'stable' | 'preview';
 
 export interface AimCatalogModel {
-  id: string;                    // e.g. "qwen3-32b"
+  id: string;                    // AIM model id (same as modelId)
   name: string;                    // Display name
   organization: string;            // e.g. "Qwen", "meta-llama", "mistralai"
   modelId: string;                 // Full model ID from catalog
@@ -34,7 +34,7 @@ export interface AimConfig {
 export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
   // CohereLabs
   {
-    id: 'cohere-command-a-reasoning-08-2025',
+    id: 'CohereLabs/Command-A-Reasoning-08-2025',
     name: 'Command A Reasoning 08 2025',
     organization: 'CohereLabs',
     modelId: 'CohereLabs/Command-A-Reasoning-08-2025',
@@ -47,7 +47,7 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
   
   // Qwen
   {
-    id: 'qwen3-235b-a22b',
+    id: 'Qwen/Qwen3-235B-A22B',
     name: 'Qwen3-235B-A22B',
     organization: 'Qwen',
     modelId: 'Qwen/Qwen3-235B-A22B',
@@ -58,7 +58,7 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
     parameters: '235B'
   },
   {
-    id: 'qwen3-32b',
+    id: 'Qwen/Qwen3-32B',
     name: 'Qwen3-32B',
     organization: 'Qwen',
     modelId: 'Qwen/Qwen3-32B',
@@ -71,7 +71,7 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
   
   // Meta-llama
   {
-    id: 'llama-3-1-405b-instruct',
+    id: 'meta-llama/Llama-3.1-405B-Instruct',
     name: 'Llama-3.1-405B-Instruct',
     organization: 'meta-llama',
     modelId: 'meta-llama/Llama-3.1-405B-Instruct',
@@ -82,7 +82,7 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
     parameters: '405B'
   },
   {
-    id: 'llama-3-1-8b-instruct',
+    id: 'meta-llama/Llama-3.1-8B-Instruct',
     name: 'Llama-3.1-8B-Instruct',
     organization: 'meta-llama',
     modelId: 'meta-llama/Llama-3.1-8B-Instruct',
@@ -93,7 +93,7 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
     parameters: '8B'
   },
   {
-    id: 'llama-3-2-1b-instruct',
+    id: 'meta-llama/Llama-3.2-1B-Instruct',
     name: 'Llama-3.2-1B-Instruct',
     organization: 'meta-llama',
     modelId: 'meta-llama/Llama-3.2-1B-Instruct',
@@ -104,7 +104,7 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
     parameters: '1B'
   },
   {
-    id: 'llama-3-2-3b-instruct',
+    id: 'meta-llama/Llama-3.2-3B-Instruct',
     name: 'Llama-3.2-3B-Instruct',
     organization: 'meta-llama',
     modelId: 'meta-llama/Llama-3.2-3B-Instruct',
@@ -115,7 +115,7 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
     parameters: '3B'
   },
   {
-    id: 'llama-3-3-70b-instruct',
+    id: 'meta-llama/Llama-3.3-70B-Instruct',
     name: 'Llama-3.3-70B-Instruct',
     organization: 'meta-llama',
     modelId: 'meta-llama/Llama-3.3-70B-Instruct',
@@ -128,7 +128,7 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
   
   // Mistralai
   {
-    id: 'mistral-small-3-2-24b-instruct',
+    id: 'mistralai/Mistral-Small-3.2-24B-Instruct-2506',
     name: 'Mistral Small 3.2 24B Instruct 2506',
     organization: 'mistralai',
     modelId: 'mistralai/Mistral-Small-3.2-24B-Instruct-2506',
@@ -139,7 +139,7 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
     parameters: '24B'
   },
   {
-    id: 'mixtral-8x22b-instruct',
+    id: 'mistralai/Mixtral-8x22B-Instruct-v0.1',
     name: 'Mixtral 8x22B Instruct v0.1',
     organization: 'mistralai',
     modelId: 'mistralai/Mixtral-8x22B-Instruct-v0.1',
@@ -150,7 +150,7 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
     parameters: '8x22B'
   },
   {
-    id: 'mixtral-8x7b-instruct',
+    id: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
     name: 'Mixtral 8x7B Instruct v0.1',
     organization: 'mistralai',
     modelId: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
@@ -163,10 +163,10 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
   
   // OpenAI
   {
-    id: 'gpt-oss-120b',
+    id: 'openai/gpt-oss-120b',
     name: 'GPT OSS 120B',
     organization: 'Openai',
-    modelId: 'openai/GPT-OSS-120B',
+    modelId: 'openai/gpt-oss-120b',
     dockerImage: 'docker.io/amdenterpriseai/aim-openai-gpt-oss-120b:0.9.0',
     version: '0.9.0',
     status: 'stable',
@@ -174,10 +174,10 @@ export const AIM_CATALOG_MODELS: AimCatalogModel[] = [
     parameters: '120B'
   },
   {
-    id: 'gpt-oss-20b',
+    id: 'openai/gpt-oss-20b',
     name: 'GPT OSS 20B',
     organization: 'Openai',
-    modelId: 'openai/GPT-OSS-20B',
+    modelId: 'openai/gpt-oss-20b',
     dockerImage: 'docker.io/amdenterpriseai/aim-openai-gpt-oss-20b:0.9.0',
     version: '0.9.0',
     status: 'stable',

@@ -3,20 +3,24 @@ import { logger } from '../utils/logger';
 
 export interface Settings {
   selectedModel: string;
+  aimModelId: string;
   customEndpoint: string;
   apiKey: string;
   temperature: number;
   maxTokens: number;
   topP: number;
+  thinkingGestureEnabled: boolean;
 }
 
 const defaultSettings: Settings = {
   selectedModel: 'LM Studio (Local)',
+  aimModelId: '',
   customEndpoint: 'http://localhost:1234',
   apiKey: '',
   temperature: 0.7,
   maxTokens: 2048,
-  topP: 0.9
+  topP: 0.9,
+  thinkingGestureEnabled: true
 };
 
 export const useSettings = () => {
@@ -27,11 +31,14 @@ export const useSettings = () => {
         const settings = JSON.parse(saved);
         return {
           selectedModel: settings.selectedModel || defaultSettings.selectedModel,
+          aimModelId: settings.aimModelId || defaultSettings.aimModelId,
           customEndpoint: settings.customEndpoint || defaultSettings.customEndpoint,
           apiKey: settings.apiKey || defaultSettings.apiKey,
           temperature: settings.temperature ?? defaultSettings.temperature,
           maxTokens: settings.maxTokens ?? defaultSettings.maxTokens,
-          topP: settings.topP ?? defaultSettings.topP
+          topP: settings.topP ?? defaultSettings.topP,
+          thinkingGestureEnabled:
+            settings.thinkingGestureEnabled ?? defaultSettings.thinkingGestureEnabled
         };
       }
     } catch (e) {

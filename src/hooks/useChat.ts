@@ -211,6 +211,8 @@ export const useChat = ({
         let backendType: 'local' | 'aim' = 'local';
         let backendUrl = customEndpoint || 'http://localhost:1234';
         let backendModel = 'default';
+        let aimModelId: string | undefined;
+        let thinkingGestureEnabled = true;
         
         // Get settings from localStorage to determine backend
         try {
@@ -219,12 +221,14 @@ export const useChat = ({
             const settings = JSON.parse(settingsStr);
             const selectedModel = settings.selectedModel || '';
             const endpoint = settings.customEndpoint || '';
+            aimModelId = settings.aimModelId || undefined;
+            thinkingGestureEnabled = settings.thinkingGestureEnabled ?? true;
             
             // Check model name first (most reliable)
             if (selectedModel.includes('AIM')) {
               backendType = 'aim';
               backendUrl = endpoint || 'http://localhost:8000';
-              backendModel = 'Qwen/Qwen3-32B'; // Default AIM model
+              backendModel = aimModelId || 'Qwen/Qwen3-32B';
             } else if (selectedModel.includes('LM Studio')) {
               backendType = 'local';
               backendUrl = endpoint || 'http://localhost:1234';
@@ -242,7 +246,7 @@ export const useChat = ({
               } else if (endpoint.includes(':8000')) {
                 backendType = 'aim';
                 backendUrl = endpoint;
-                backendModel = 'Qwen/Qwen3-32B';
+                backendModel = aimModelId || 'Qwen/Qwen3-32B';
               } else if (endpoint.includes(':11434')) {
                 backendType = 'local';
                 backendUrl = endpoint;
@@ -260,7 +264,7 @@ export const useChat = ({
               } else if (endpoint.includes(':8000')) {
                 backendType = 'aim';
                 backendUrl = endpoint;
-                backendModel = 'Qwen/Qwen3-32B';
+                backendModel = aimModelId || 'Qwen/Qwen3-32B';
               } else if (endpoint.includes(':11434')) {
                 backendType = 'local';
                 backendUrl = endpoint;
@@ -282,7 +286,9 @@ export const useChat = ({
           task_type: 'reachy_devops_copilot',
           input: {
             prompt: prompt,
-            model: backendModel
+            model: backendModel,
+            thinking_gesture_enabled: thinkingGestureEnabled,
+            stream_response: true
           },
           routing: {
             backend: backendType,
@@ -351,6 +357,10 @@ export const useChat = ({
               pollAttempts,
               hasResult: !!finalTaskStatus.result 
             });
+            
+            if (finalTaskStatus.result?.content && finalTaskStatus.state !== 'completed') {
+              setResponseContent(finalTaskStatus.result.content);
+            }
             
             if (finalTaskStatus.state === 'completed') {
               logger.log('Task completed', { taskId, result: finalTaskStatus.result });

@@ -59,7 +59,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 function App() {
   // Use extracted hooks
   const { settings, updateSettings } = useSettings();
-  const { selectedModel, customEndpoint, apiKey, temperature, maxTokens, topP } = settings;
+  const { selectedModel, customEndpoint, apiKey, temperature, maxTokens, topP, aimModelId, thinkingGestureEnabled } = settings;
 
   const { 
     messages, 
@@ -1044,7 +1044,9 @@ function App() {
         apiKey,
         temperature,
         maxTokens,
-        topP
+        topP,
+        aimModelId,
+        thinkingGestureEnabled
       });
       
       // Also save to history (last 3 sessions)
@@ -1054,10 +1056,12 @@ function App() {
         apiKey,
         temperature,
         maxTokens,
-        topP
+        topP,
+        aimModelId,
+        thinkingGestureEnabled
       });
     }
-  }, [messages, selectedModel, customEndpoint, apiKey, temperature, maxTokens, topP]);
+  }, [messages, selectedModel, customEndpoint, apiKey, temperature, maxTokens, topP, aimModelId, thinkingGestureEnabled]);
 
   // Check for recoverable session on mount
   useEffect(() => {
@@ -1075,13 +1079,15 @@ function App() {
         apiKey,
         temperature,
         maxTokens,
-        topP
+        topP,
+        aimModelId,
+        thinkingGestureEnabled
       };
       localStorage.setItem('multiverse-settings', JSON.stringify(settings));
     } catch (e) {
       logger.warn('Failed to save settings:', e);
     }
-  }, [selectedModel, customEndpoint, apiKey, temperature, maxTokens, topP]);
+  }, [selectedModel, customEndpoint, apiKey, temperature, maxTokens, topP, aimModelId, thinkingGestureEnabled]);
 
   // Keyboard shortcuts
   useEffect(() => {

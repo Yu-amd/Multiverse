@@ -94,18 +94,18 @@ class GestureController:
             
             # Quick nod: look down more noticeably, then back up
             # Use a larger movement for better visibility on hardware.
-            logger.debug("Executing ACK gesture movement", z=-25)
+            logger.debug("Executing ACK gesture movement", z=-35)
             robot.goto_target(
-                head=create_head_pose(z=-25, roll=0, degrees=True, mm=True),
-                duration=0.5
+                head=create_head_pose(z=-35, roll=0, degrees=True, mm=True),
+                duration=0.6
             )
             logger.debug("ACK gesture movement command sent, waiting...")
-            await asyncio.sleep(0.6)  # Wait for movement to complete
+            await asyncio.sleep(0.7)  # Wait for movement to complete
             robot.goto_target(
                 head=create_head_pose(z=0, roll=0, degrees=True, mm=True),
-                duration=0.5
+                duration=0.6
             )
-            await asyncio.sleep(0.4)  # Wait for return movement
+            await asyncio.sleep(0.5)  # Wait for return movement
             
             logger.info("Gesture: ACK completed", gesture="ack")
         except Exception as e:
@@ -394,6 +394,32 @@ class GestureController:
             logger.info("Gesture: ANTENNAS_UP", gesture="antennas_up")
         except Exception as e:
             logger.error("Failed to execute ANTENNAS_UP gesture", error=str(e), error_type=type(e).__name__)
+
+    async def antenna_swing(self) -> None:
+        """Simple antenna swing gesture (up then back) for minimal motion."""
+        if self.is_mocked:
+            logger.info("Gesture: ANTENNA_SWING (mocked)", gesture="antenna_swing")
+            await asyncio.sleep(0.4)
+            return
+        
+        try:
+            robot = await self._get_robot()
+            if not robot:
+                logger.warning("Robot not available for ANTENNA_SWING gesture")
+                return
+            try:
+                robot.enable_motors()
+            except Exception:
+                pass
+            robot.set_target_antenna_joint_positions([0.0, 0.0])
+            await asyncio.sleep(0.5)
+            robot.set_target_antenna_joint_positions([-0.6, 0.6])
+            await asyncio.sleep(0.5)
+            robot.set_target_antenna_joint_positions([0.0, 0.0])
+            await asyncio.sleep(0.4)
+            logger.info("Gesture: ANTENNA_SWING", gesture="antenna_swing")
+        except Exception as e:
+            logger.error("Failed to execute ANTENNA_SWING gesture", error=str(e), error_type=type(e).__name__)
 
     async def speaking_end_gesture(self) -> None:
         """Return head to neutral after speech completes."""

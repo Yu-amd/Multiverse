@@ -258,6 +258,131 @@ class BackendClient:
                 latency_ms=elapsed_ms
             )
             raise
+
+    async def chat_completion_stream(
+        self,
+        model: str,
+        messages: list[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        """
+        Stream chat completion deltas from backend.
+        Yields text chunks as they arrive.
+        """
+        if self.base_url.endswith('/v1'):
+            url = f"{self.base_url}/chat/completions"
+        else:
+            url = f"{self.base_url}/v1/chat/completions"
+        
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            **kwargs
+        }
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+        
+        start_time = time.time()
+        _record_llm_request()
+        backend_label = str(self.backend)
+        first_token_ms: Optional[int] = None
+        content_chunks = 0
+        output_chars = 0
+        usage: Optional[Dict[str, Any]] = None
+        # For fallback estimation, count user prompt text only to better match UI expectations.
+        input_chars = sum(
+            len(msg.get("content", "") or "")
+            for msg in messages
+            if (msg.get("role") or "").lower() == "user"
+        )
+        
+        try:
+            logger.info(
+                "Sending streaming chat completion request",
+                backend=str(self.backend),
+                base_url=self.base_url,
+                model=model
+            )
+            async with self.client.stream("POST", url, json=payload, headers=headers) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        data = line[6:].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            result = httpx.Response(200, content=data).json()
+                        except Exception:
+                            continue
+                        choices = result.get("choices") or []
+                        if choices:
+                            choice = choices[0]
+                            delta = choice.get("delta", {}) if isinstance(choice, dict) else {}
+                            chunk = delta.get("content", "")
+                            if chunk:
+                                content_chunks += 1
+                                output_chars += len(chunk)
+                                if first_token_ms is None:
+                                    first_token_ms = int((time.time() - start_time) * 1000)
+                                    record_llm_ttft(backend_label, model, first_token_ms)
+                                    _record_llm_latency(first_token_ms)
+                                yield chunk
+                        if result.get("usage"):
+                            usage = result.get("usage")
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                record_llm_request(backend_label, model, "success")
+                record_llm_total_latency(backend_label, model, elapsed_ms)
+                record_aim_latency("chat_completion_stream", elapsed_ms)
+                if usage:
+                    input_tokens = int(usage.get("prompt_tokens", 0) or 0)
+                    output_tokens = int(usage.get("completion_tokens", 0) or 0)
+                    if input_tokens:
+                        record_llm_tokens_in(backend_label, model, input_tokens)
+                    if output_tokens:
+                        record_llm_tokens_out(backend_label, model, output_tokens)
+                else:
+                    # Fallback: approximate tokens by character count to avoid zero metrics.
+                    input_tokens = max(0, int(input_chars / 4))
+                    output_tokens = max(0, int(output_chars / 4))
+                    if input_tokens:
+                        record_llm_tokens_in(backend_label, model, input_tokens)
+                    if output_tokens:
+                        record_llm_tokens_out(backend_label, model, output_tokens)
+                logger.info(
+                    "Streaming chat completion finished",
+                    backend=str(self.backend),
+                    model=model,
+                    latency_ms=elapsed_ms,
+                    chunks=content_chunks
+                )
+        except httpx.HTTPStatusError as e:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            status_code = e.response.status_code
+            record_llm_request(backend_label, model, f"error_{status_code}")
+            record_llm_total_latency(backend_label, model, elapsed_ms)
+            if status_code == 429:
+                record_llm_rate_limited(backend_label)
+                _record_llm_rate_limit()
+            logger.error(
+                "Streaming chat completion failed",
+                backend=str(self.backend),
+                model=model,
+                status_code=status_code,
+                error=str(e),
+                latency_ms=elapsed_ms
+            )
+            raise
         except httpx.TimeoutException as e:
             elapsed_ms = int((time.time() - start_time) * 1000)
             record_llm_request(backend_label, model, "timeout")

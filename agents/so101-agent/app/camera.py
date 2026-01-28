@@ -184,6 +184,19 @@ def _is_laptop_camera(device_path: str) -> bool:
     return False
 
 
+def _is_reachy_camera(device_path: str) -> bool:
+    try:
+        name_path = Path(device_path).resolve()
+        if name_path.name.startswith("video"):
+            sys_name = Path("/sys/class/video4linux") / name_path.name / "name"
+            if sys_name.exists():
+                name = sys_name.read_text(encoding="utf-8").strip().lower()
+                return any(token in name for token in ("reachy", "pollen", "reachy mini"))
+    except Exception:
+        return False
+    return False
+
+
 def _get_camera_name(device_path: str) -> Optional[str]:
     try:
         name_path = Path(device_path).resolve()
@@ -219,6 +232,8 @@ def _resolve_camera_device(device: str, width: int, height: int, fps: int) -> st
             name = _get_camera_name(candidate_path)
             if name != preferred_name:
                 continue
+            if _is_reachy_camera(candidate_path):
+                continue
             if _test_camera_device(candidate_path, width, height, fps):
                 if camera_cfg.get("device") != candidate_path:
                     camera_cfg["device"] = candidate_path
@@ -231,11 +246,13 @@ def _resolve_camera_device(device: str, width: int, height: int, fps: int) -> st
         for candidate in {device, resolved}:
             if _is_laptop_camera(candidate):
                 continue
+            if _is_reachy_camera(candidate):
+                continue
             if _test_camera_device(candidate, width, height, fps):
                 return candidate
 
     candidates = [str(path) for path in sorted(Path("/dev").glob("video*"))]
-    non_laptop = [path for path in candidates if not _is_laptop_camera(path)]
+    non_laptop = [path for path in candidates if not _is_laptop_camera(path) and not _is_reachy_camera(path)]
     preferred = [path for path in non_laptop if _is_usb_camera(path)] or non_laptop
 
     for candidate_path in preferred:

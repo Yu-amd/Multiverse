@@ -5,6 +5,8 @@ Implements DevOps copilot scenario with gesture feedback.
 import sys
 import os
 import uuid
+import time
+import asyncio
 from pathlib import Path
 
 # Module initialization - debug output can be removed in production
@@ -481,7 +483,6 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                 try:
                     # Wait a bit for daemon/Zenoh to be ready if needed
                     from app.daemon_manager import is_daemon_running, wait_for_zenoh_ready
-                    import asyncio
                     if is_daemon_running():
                         # Daemon is running, ensure Zenoh is ready (run in executor since it's blocking)
                         loop = asyncio.get_event_loop()
@@ -506,39 +507,7 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                 except Exception as e:
                     logger.error("Exception during robot connection attempt", error=str(e), error_type=type(e).__name__)
             
-            # Wake the robot when a chat task is launched so it's obvious it's active.
-            if reachy_driver.is_connected():
-                print("🔵 Chat task launched - running wake-up gesture...", flush=True)
-                logger.info("Chat task launched - running wake-up gesture")
-                try:
-                    await asyncio.sleep(0.5)  # Wait a moment for connection to stabilize
-                    await gesture_controller.wake_up_gesture()
-                    print("🔵✅ Wake-up gesture completed", flush=True)
-                    logger.info("Wake-up gesture completed on task launch")
-                except Exception as reset_error:
-                    print(f"🔵❌ Failed to run wake-up gesture on task launch: {str(reset_error)}", flush=True)
-                    logger.warning(
-                        "Failed to run wake-up gesture on task launch",
-                        error=str(reset_error),
-                        error_type=type(reset_error).__name__
-                    )
-                    # Don't fail task execution if reset fails
-            
-            # Log gesture attempt state
-            robot_before_gesture = reachy_driver.get_robot() if reachy_driver.is_connected() else None
-            print(f"🔵 About to perform ACK gesture - driver_mocked={reachy_driver.mocked}, driver_connected={reachy_driver.is_connected()}, gesture_mocked={gesture_controller.is_mocked}", flush=True)
-            logger.info("About to perform ACK gesture", driver_mocked=reachy_driver.mocked, driver_connected=reachy_driver.is_connected(), gesture_controller_mocked=gesture_controller.is_mocked, robot_available=robot_before_gesture is not None, robot_type=type(robot_before_gesture).__name__ if robot_before_gesture else None)
-            try:
-                print(f"🔵 Calling ack_gesture()...", flush=True)
-                await gesture_controller.ack_gesture()
-                print(f"🔵✅ ACK gesture completed", flush=True)
-                logger.info("ACK gesture completed")
-            except Exception as gesture_error:
-                print(f"🔵❌ ACK gesture failed: {str(gesture_error)}", flush=True)
-                logger.error("ACK gesture failed", error=str(gesture_error), error_type=type(gesture_error).__name__)
-                import traceback
-                logger.error("ACK gesture traceback", traceback=traceback.format_exc())
-                # Continue execution even if gesture fails
+            # Skip pre-response gestures to keep inference feeling fast.
             
             # Check if this is a DevOps copilot task
             if task_request.task_type != "reachy_devops_copilot":
@@ -571,29 +540,14 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                 data={"backend": str(backend)},
             ))
             
-            # Start thinking gesture and backend inference in parallel for better performance
-            # The gesture will run while waiting for the backend response
-            import asyncio
-            
-            async def run_thinking_gesture():
-                """Run thinking gesture in background."""
-                print(f"🔵 About to perform THINKING gesture...", flush=True)
-                try:
-                    await gesture_controller.thinking_gesture()
-                    print(f"🔵✅ THINKING gesture completed", flush=True)
-                    logger.info("Thinking gesture completed")
-                except Exception as gesture_error:
-                    print(f"🔵❌ THINKING gesture failed: {str(gesture_error)}", flush=True)
-                    logger.error("Thinking gesture failed", error=str(gesture_error), error_type=type(gesture_error).__name__)
-                    import traceback
-                    logger.error("Thinking gesture traceback", traceback=traceback.format_exc())
-            
-            # Start thinking gesture as background task (don't await it)
-            thinking_task = asyncio.create_task(run_thinking_gesture())
+            # Minimal gesture mode: no thinking gesture to keep motion light.
+            thinking_task = None
             
             # Call backend for inference immediately (in parallel with gesture)
             aim_latency_ms = None
             response_content = ""
+            stream_response = bool(task_request.input.get("stream_response", True))
+            streaming_speech = False
             
             try:
                 print(f"🔵 About to call backend: backend={backend}, base_url={base_url}, model={task_request.input.get('model', 'default')}, prompt_length={len(prompt)}", flush=True)
@@ -614,27 +568,115 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                         {"role": "user", "content": prompt},
                     ]
                     
-                    print(f"🔵 Calling backend chat_completion...", flush=True)
-                    result = await client.chat_completion(
-                        model=model,
-                        messages=messages,
-                        temperature=0.7,
-                        max_tokens=1000
-                    )
-                    
-                    response_content = _sanitize_response(result["content"])
-                    aim_latency_ms = result["latency_ms"]
-                    print(f"🔵✅ Backend inference completed: response_length={len(response_content) if response_content else 0}, latency_ms={aim_latency_ms}", flush=True)
-                    
-                    # Wait for thinking gesture to complete if it's still running
-                    if not thinking_task.done():
-                        print(f"🔵 Waiting for thinking gesture to complete...", flush=True)
-                        try:
-                            await thinking_task
-                        except Exception as e:
-                            logger.warning("Thinking gesture task had error", error=str(e))
+                    if stream_response:
+                        print("🔵 Calling backend chat_completion_stream...", flush=True)
+                        stream_start = time.time()
+                        sentence_buffer = ""
+                        speech_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+                        async def prepare_audio_for_streaming() -> bool:
+                            config_audio_enabled = is_audio_enabled()
+                            env_audio_enabled = os.getenv("REACHY_AUDIO_ENABLED", "").lower()
+                            if env_audio_enabled and env_audio_enabled in ("false", "0", "no", "off"):
+                                audio_enabled = False
+                            else:
+                                audio_enabled = config_audio_enabled
+                            if not audio_enabled:
+                                return False
+                            if not reachy_driver.mocked:
+                                if not reachy_driver.is_connected():
+                                    try:
+                                        from app.daemon_manager import is_daemon_running, wait_for_zenoh_ready
+                                        if is_daemon_running():
+                                            loop = asyncio.get_event_loop()
+                                            zenoh_ready = await loop.run_in_executor(None, wait_for_zenoh_ready, 5.0)
+                                            if not zenoh_ready:
+                                                logger.warning("Audio: Zenoh not ready, attempting connection anyway")
+                                        connected = await reachy_driver.connect(force=True)
+                                        if connected and reachy_driver.is_connected():
+                                            logger.info("Audio: Driver connected successfully")
+                                        else:
+                                            logger.warning("Audio: Driver connection failed, but audio may still work via PulseAudio", driver_connected=reachy_driver.is_connected())
+                                    except Exception as e:
+                                        logger.warning("Audio: Connection attempt failed, but audio may still work via PulseAudio", error=str(e))
+                                if reachy_driver.is_connected():
+                                    robot_instance = reachy_driver.get_robot()
+                                    if robot_instance:
+                                        audio_controller.robot = robot_instance
+                                        audio_controller.is_mocked = False
+                                    else:
+                                        logger.warning("Audio: Robot instance is None")
+                                else:
+                                    audio_controller.robot = None
+                                    audio_controller.is_mocked = False
+                                    if audio_controller._temp_dir is None:
+                                        import tempfile
+                                        audio_controller._temp_dir = tempfile.mkdtemp(prefix="reachy_audio_")
+                            else:
+                                logger.info("Audio: Hardware mocked, using mocked audio")
+                            return True
+
+                        async def stream_speech_worker() -> None:
+                            while True:
+                                chunk = await speech_queue.get()
+                                if chunk is None:
+                                    break
+                                if chunk.strip():
+                                    try:
+                                        if reachy_driver.is_connected():
+                                            asyncio.create_task(gesture_controller.antenna_swing())
+                                        await audio_controller.speak(chunk.strip())
+                                    except Exception as audio_error:
+                                        logger.warning("Streaming audio failed", error=str(audio_error))
+
+                        audio_enabled = await prepare_audio_for_streaming()
+                        speech_task = asyncio.create_task(stream_speech_worker()) if audio_enabled else None
+
+                        async for chunk in client.chat_completion_stream(
+                            model=model,
+                            messages=messages,
+                            temperature=0.7,
+                            max_tokens=1000
+                        ):
+                            response_content += chunk
+                            tasks[task_id].result = {"content": response_content, "prompt": prompt}
+                            tasks[task_id].updated_at = datetime.now(timezone.utc)
+                            await emit_event(Event(
+                                event=EventType.PROGRESS_UPDATE,
+                                task_id=task_id,
+                                data={"content": response_content},
+                            ))
+                            sentence_buffer += chunk
+                            if speech_task:
+                                split_idx = max(sentence_buffer.rfind('.'), sentence_buffer.rfind('!'), sentence_buffer.rfind('?'))
+                                if split_idx >= 40:
+                                    sentence = sentence_buffer[:split_idx + 1]
+                                    sentence_buffer = sentence_buffer[split_idx + 1:]
+                                    await speech_queue.put(sentence)
+                        if speech_task:
+                            if sentence_buffer.strip():
+                                await speech_queue.put(sentence_buffer.strip())
+                            await speech_queue.put(None)
+                            streaming_speech = True
+                        aim_latency_ms = int((time.time() - stream_start) * 1000)
+                        response_content = _sanitize_response(response_content)
+                        print(f"🔵✅ Backend streaming completed: response_length={len(response_content) if response_content else 0}, latency_ms={aim_latency_ms}", flush=True)
                     else:
-                        print(f"🔵 Thinking gesture already completed", flush=True)
+                        print(f"🔵 Calling backend chat_completion...", flush=True)
+                        result = await client.chat_completion(
+                            model=model,
+                            messages=messages,
+                            temperature=0.7,
+                            max_tokens=1000
+                        )
+                        
+                        response_content = _sanitize_response(result["content"])
+                        aim_latency_ms = result["latency_ms"]
+                        print(f"🔵✅ Backend inference completed: response_length={len(response_content) if response_content else 0}, latency_ms={aim_latency_ms}", flush=True)
+                    
+                    # Do not wait on thinking gesture; keep response latency low.
+                    if thinking_task:
+                        print("🔵 Thinking gesture running in background", flush=True)
                     
             except Exception as e:
                 print(f"🔵❌ Backend inference failed: {str(e)}", flush=True)
@@ -656,19 +698,7 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                 data={"aim_ms": aim_latency_ms},
             ))
             
-            # Perform done gesture
-            print(f"🔵 About to perform DONE gesture...", flush=True)
-            logger.info("About to perform done gesture", driver_connected=reachy_driver.is_connected())
-            try:
-                await gesture_controller.done_gesture()
-                print(f"🔵✅ DONE gesture completed", flush=True)
-                logger.info("Done gesture completed")
-            except Exception as gesture_error:
-                print(f"🔵❌ DONE gesture failed: {str(gesture_error)}", flush=True)
-                logger.error("Done gesture failed", error=str(gesture_error), error_type=type(gesture_error).__name__)
-                import traceback
-                logger.error("Done gesture traceback", traceback=traceback.format_exc())
-                # Continue execution even if gesture fails
+            # Minimal gesture mode: skip done gesture.
             
             # Calculate end-to-end latency (before TTS)
             end_time = datetime.now(timezone.utc)
@@ -716,6 +746,8 @@ async def execute_task(task_id: str, task_request: TaskRequest):
 
             async def run_tts() -> None:
                 # Play audio response through robot's speaker (if enabled)
+                if streaming_speech:
+                    return
                 # Check config file first, then environment variable
                 config_audio_enabled = is_audio_enabled()
                 env_audio_enabled = os.getenv("REACHY_AUDIO_ENABLED", "").lower()
@@ -793,14 +825,11 @@ async def execute_task(task_id: str, task_request: TaskRequest):
                     logger.info("Audio: About to call speak()", is_mocked=audio_controller.is_mocked, robot_available=audio_controller.robot is not None, response_length=len(response_content))
                     try:
                         if reachy_driver.is_connected():
-                            await gesture_controller.raise_antennas()
-                            await gesture_controller.speaking_start_gesture()
+                            asyncio.create_task(gesture_controller.antenna_swing())
                         print(f"🔵 Calling audio_controller.speak()...", flush=True)
                         speak_result = await audio_controller.speak(response_content)
                         print(f"🔵✅ Audio speak completed: success={speak_result}", flush=True)
                         logger.info("Audio: Speak completed", success=speak_result, text_length=len(response_content), is_mocked=audio_controller.is_mocked)
-                        if reachy_driver.is_connected():
-                            await gesture_controller.speaking_end_gesture()
                     except Exception as audio_error:
                         print(f"🔵❌ Audio speak failed: {str(audio_error)}", flush=True)
                         logger.error("Audio speak failed", error=str(audio_error), error_type=type(audio_error).__name__)
