@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFleet } from '../hooks/useFleet';
-import { fleetApi } from '../services/fleetApi';
+import { fleetApi, lekiwiConfig } from '../services/fleetApi';
 import { useToast } from '../hooks/useToast';
 import type { Robot } from '../services/fleetApi';
 import './FleetPage.css';
@@ -348,6 +348,10 @@ export const FleetPage: React.FC = () => {
       navigate('/tasks');
       return;
     }
+    if (robotId === lekiwiConfig.deviceId) {
+      navigate('/tasks?task=lekiwi');
+      return;
+    }
     navigate(`/tasks?robot=${robotId}`);
   };
 
@@ -488,7 +492,7 @@ export const FleetPage: React.FC = () => {
               <span className="info-label">BACKEND</span>
               <span className="info-value">{robot.backend}</span>
             </div>
-            {robot.health?.uptime_seconds && (
+            {robot.health && 'uptime_seconds' in robot.health && robot.health.uptime_seconds && (
               <div className="robot-info-row">
                 <span className="info-label">UPTIME</span>
                 <span className="info-value">{Math.floor(robot.health.uptime_seconds / 60)} min</span>

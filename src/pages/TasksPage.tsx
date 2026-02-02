@@ -3,6 +3,8 @@ import type { Message } from '../types';
 import { ChatContainer } from '../components/ChatContainer';
 import { CodePanel } from '../components/CodePanel';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { lekiwiConfig } from '../services/fleetApi';
+import { evaluateLeKiwiPolicy } from '../services/policyEngine';
 import './TasksPage.css';
 
 interface TasksPageProps {
@@ -34,7 +36,7 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
   const [inputMessage] = useState('');
   const [showCodePreview, setShowCodePreview] = useState(false);
   const stopGenerationRef = useRef<(() => void) | null>(null);
-  const [selectedTask, setSelectedTask] = useState<'chat' | 'so101' | 'so101-camera' | null>(null);
+  const [selectedTask, setSelectedTask] = useState<'chat' | 'so101' | 'so101-camera' | 'lekiwi' | null>(null);
   const [showChatTask, setShowChatTask] = useState(false);
   const [chatRunning, setChatRunning] = useState(false);
   const [localMessages, setLocalMessages] = useState<Message[]>([]);
@@ -68,6 +70,22 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
   const [reachyConnected, setReachyConnected] = useState<boolean | null>(null);
   const [reachyHardwareEnabled, setReachyHardwareEnabled] = useState<boolean | null>(null);
   const [reachySerialPort, setReachySerialPort] = useState('');
+  const [lekiwiRunning, setLeKiwiRunning] = useState(false);
+  const [lekiwiError, setLeKiwiError] = useState<string | null>(null);
+  const [lekiwiRuns, setLeKiwiRuns] = useState<
+    Array<{
+      id: string;
+      taskType: string;
+      status: string;
+      admission_decision?: 'allowed' | 'denied';
+      admission_reason?: string;
+      timings?: { total?: number };
+    }>
+  >([]);
+  const [lekiwiSequence, setLeKiwiSequence] = useState('lekiwi_example');
+  const lekiwiSequences =
+    (import.meta as any).env?.VITE_LEKIWI_SEQUENCES?.split(',').map((item: string) => item.trim()).filter(Boolean) ||
+    ['lekiwi_example'];
 
   useEffect(() => {
     const fetchDatasetInfo = async () => {
@@ -102,8 +120,8 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
 
   useEffect(() => {
     const taskParam = searchParams.get('task');
-    if (taskParam === 'chat' || taskParam === 'so101') {
-      setSelectedTask(taskParam as 'chat' | 'so101');
+    if (taskParam === 'chat' || taskParam === 'so101' || taskParam === 'lekiwi') {
+      setSelectedTask(taskParam as 'chat' | 'so101' | 'lekiwi');
       if (taskParam === 'chat') {
         setShowChatTask(true);
       }
@@ -115,6 +133,12 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
       setShowChatTask(false);
     }
   }, [selectedTask]);
+
+  useEffect(() => {
+    if (lekiwiSequences.length > 0) {
+      setLeKiwiSequence(lekiwiSequences[0]);
+    }
+  }, [lekiwiSequences]);
 
   useEffect(() => {
     if (!showChatTask || selectedTask !== 'chat') {
@@ -240,6 +264,100 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
     }
   };
 
+  const submitLeKiwiTask = async (taskType: string, input: Record<string, unknown>) => {
+    setLeKiwiError(null);
+    setLeKiwiRunning(true);
+    try {
+      let healthStatus: 'READY' | 'DEGRADED' | 'UNKNOWN' = 'UNKNOWN';
+      const healthResponse = await fetch(`${lekiwiConfig.baseUrl}/healthz`);
+      if (healthResponse.ok) {
+        const healthData = await healthResponse.json();
+        healthStatus = healthData.status || 'UNKNOWN';
+      }
+
+      const armBusy = lekiwiRuns.some(
+        (run) => run.status === 'RUNNING' && run.taskType === 'so101.move_pose_sequence'
+      );
+      const baseBusy = lekiwiRuns.some(
+        (run) => run.status === 'RUNNING' && run.taskType.startsWith('lekiwi.')
+      );
+
+      const decision = evaluateLeKiwiPolicy({
+        taskType,
+        healthStatus,
+        baseBusy,
+        armBusy,
+      });
+      if (!decision.allowed) {
+        const deniedRunId = `denied-${Date.now()}`;
+        setLeKiwiRuns((prev) => {
+          const deniedRun = {
+            id: deniedRunId,
+            taskType,
+            status: 'DENIED',
+            admission_decision: 'denied' as const,
+            admission_reason: decision.reason,
+          };
+          return [deniedRun, ...prev].slice(0, 8);
+        });
+        safeShowToast(decision.reason, 'error');
+        return;
+      }
+
+      const response = await fetch(`${lekiwiConfig.baseUrl}/v1/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_type: taskType, input }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to submit LeKiwi task');
+      }
+      const data = await response.json();
+      const runId = data.task_id as string;
+      setLeKiwiRuns((prev) => {
+        const acceptedRun = {
+          id: runId,
+          taskType,
+          status: data.status || 'QUEUED',
+          admission_decision: 'allowed' as const,
+          admission_reason: 'POLICY_OK',
+        };
+        return [acceptedRun, ...prev].slice(0, 8);
+      });
+      await pollLeKiwiTask(runId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'LeKiwi task failed';
+      setLeKiwiError(message);
+      safeShowToast(message, 'error');
+    } finally {
+      setLeKiwiRunning(false);
+    }
+  };
+
+  const pollLeKiwiTask = async (taskId: string) => {
+    for (let i = 0; i < 60; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      try {
+        const response = await fetch(`${lekiwiConfig.baseUrl}/v1/tasks/${taskId}`);
+        if (!response.ok) {
+          continue;
+        }
+        const data = await response.json();
+        const status = data.status || 'UNKNOWN';
+        setLeKiwiRuns((prev) =>
+          prev.map((run) =>
+            run.id === taskId ? { ...run, status, timings: data.timings_ms } : run
+          )
+        );
+        if (['COMPLETED', 'FAILED', 'CANCELED'].includes(String(status).toUpperCase())) {
+          break;
+        }
+      } catch {
+        // ignore transient polling errors
+      }
+    }
+  };
+
   const runCameraStream = async () => {
     if (cameraRunning) return;
     setCameraRunning(true);
@@ -322,6 +440,28 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
               </button>
             </div>
           </section>
+          <section className="tasks-section">
+            <div className="tasks-section-header">
+              <h2>LeKiwi</h2>
+              <span>3 tasks</span>
+            </div>
+            <div className="tasks-tiles">
+              <button
+                className={`task-tile ${selectedTask === 'lekiwi' ? 'active' : ''} ${lekiwiRunning ? 'running' : ''}`}
+                onClick={() => {
+                  setSelectedTask('lekiwi');
+                  setShowChatTask(false);
+                }}
+                type="button"
+              >
+                <div>
+                  <h2>LeKiwi Task Endpoint</h2>
+                  <p>Base motion, stop, and arm sequence playback.</p>
+                </div>
+                <span className="task-tile-cta">Review & Run</span>
+              </button>
+            </div>
+          </section>
         </div>
 
         {selectedTask && selectedTask !== 'chat' && (
@@ -331,6 +471,8 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
                 <h3>
                   {selectedTask === 'so101-camera'
                     ? 'SO-101 Camera Task'
+                    : selectedTask === 'lekiwi'
+                    ? 'LeKiwi Task'
                     : 'SO-101 Replay Task'}
                 </h3>
                 <button
@@ -387,6 +529,86 @@ export const TasksPage: React.FC<TasksPageProps> = (props) => {
                         Start Stream
                       </button>
                     </div>
+                  </>
+                ) : selectedTask === 'lekiwi' ? (
+                  <>
+                    <p>Send motion commands to the LeKiwi base and play arm sequences.</p>
+                    {lekiwiError && <div className="so101-task-error">Error: {lekiwiError}</div>}
+                    <div className="task-overlay-actions">
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => submitLeKiwiTask('lekiwi.move_base', { linear: 0.2, angular: 0, duration_s: 1 })}
+                        disabled={lekiwiRunning}
+                      >
+                        Forward 0.2 m/s (1s)
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => submitLeKiwiTask('lekiwi.move_base', { linear: -0.2, angular: 0, duration_s: 1 })}
+                        disabled={lekiwiRunning}
+                      >
+                        Backward 0.2 m/s (1s)
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => submitLeKiwiTask('lekiwi.move_base', { linear: 0, angular: 20, duration_s: 1 })}
+                        disabled={lekiwiRunning}
+                      >
+                        Turn Left 20°/s (1s)
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => submitLeKiwiTask('lekiwi.move_base', { linear: 0, angular: -20, duration_s: 1 })}
+                        disabled={lekiwiRunning}
+                      >
+                        Turn Right 20°/s (1s)
+                      </button>
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => submitLeKiwiTask('lekiwi.stop', {})}
+                        disabled={lekiwiRunning}
+                      >
+                        STOP
+                      </button>
+                    </div>
+                    <div className="so101-task-dataset" style={{ marginTop: '1rem' }}>
+                      <span className="so101-task-label">Pose Sequence</span>
+                      <select
+                        value={lekiwiSequence}
+                        onChange={(event) => setLeKiwiSequence(event.target.value)}
+                        className="so101-task-path"
+                      >
+                        {lekiwiSequences.map((sequence: string) => (
+                          <option key={sequence} value={sequence}>
+                            {sequence}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => submitLeKiwiTask('so101.move_pose_sequence', { sequence_id: lekiwiSequence })}
+                        disabled={lekiwiRunning}
+                      >
+                        Run Sequence
+                      </button>
+                    </div>
+                    {lekiwiRuns.length > 0 && (
+                      <div className="so101-task-result" style={{ marginTop: '1rem' }}>
+                        <strong>Recent Runs</strong>
+                        <div>
+                          {lekiwiRuns.slice(0, 5).map((run) => (
+                            <div key={run.id} className="so101-task-status">
+                              <span>{run.taskType}</span>
+                              <span className="so101-task-badge">
+                                {run.status}
+                                {run.admission_reason ? ` · ${run.admission_reason}` : ''}
+                                {run.timings?.total ? ` · ${run.timings.total} ms` : ''}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>

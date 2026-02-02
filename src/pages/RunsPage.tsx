@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTaskEvents, useTaskExecution } from '../hooks/useFleet';
-import { fleetApi, type TaskEvent, type TaskStatus } from '../services/fleetApi';
+import { fleetApi, lekiwiConfig, type TaskEvent, type TaskStatus } from '../services/fleetApi';
 import './RunsPage.css';
 
 interface RunEvent {
@@ -142,6 +142,8 @@ export const RunsPage: React.FC = () => {
     ? 'http://localhost:9101'
     : effectiveRobotId === 'reachy-001'
     ? 'http://localhost:9001'
+    : effectiveRobotId === lekiwiConfig.deviceId
+    ? lekiwiConfig.baseUrl
     : undefined;
 
   // Fetch task status if we have a taskId

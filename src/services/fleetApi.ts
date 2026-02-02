@@ -23,11 +23,11 @@ export interface HealthStatus {
 export interface TaskRequest {
   task_type: string;
   input: {
-    prompt: string;
+    prompt?: string;
     model?: string;
     [key: string]: any;
   };
-  routing: {
+  routing?: {
     backend: 'aim' | 'openai' | 'local';
     base_url: string;
     api_key: string;
@@ -52,6 +52,8 @@ export interface TaskStatus {
   e2e_ms?: number;
   e2e_slo_ms?: number;
   slo_pass?: boolean;
+  admission_decision?: 'allowed' | 'denied';
+  admission_reason?: string;
   result?: {
     content: string;
     prompt?: string;
@@ -80,9 +82,25 @@ export interface Robot {
   lastLatency?: number;
   capabilities: string[];
   url: string; // Agent API URL
-  health?: HealthStatus;
+  health?: HealthStatus | LeKiwiHealth;
   info?: AgentInfo;
   hardwareEnabled?: boolean; // Whether hardware is enabled
+}
+
+const env = (import.meta as any).env ?? {};
+export const lekiwiConfig = {
+  baseUrl:
+    env.LEKIWI_BASE_URL ||
+    env.VITE_LEKIWI_BASE_URL ||
+    'http://lekiwi-01.local:8008',
+  deviceId: env.LEKIWI_DEVICE_ID || env.VITE_LEKIWI_DEVICE_ID || 'lekiwi-001',
+};
+
+export interface LeKiwiHealth {
+  device_id: string;
+  status: 'READY' | 'DEGRADED';
+  components?: Record<string, string>;
+  versions?: Record<string, string>;
 }
 
 class FleetApiService {
@@ -107,6 +125,14 @@ class FleetApiService {
     const response = await fetch(`${agentUrl}/v1/agent/health${query}`);
     if (!response.ok) {
       throw new Error(`Failed to get agent health: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getLeKiwiHealth(agentUrl: string): Promise<LeKiwiHealth> {
+    const response = await fetch(`${agentUrl}/healthz`);
+    if (!response.ok) {
+      throw new Error(`Failed to get LeKiwi health: ${response.statusText}`);
     }
     return response.json();
   }
@@ -213,64 +239,81 @@ class FleetApiService {
       { id: 'so101-follower', name: 'SO-101 Follower', type: 'Actuation Arm', url: 'http://localhost:9101' },
       { id: 'so101-camera', name: 'SO-101 Camera', type: 'Sensor', url: 'http://localhost:9101' },
       { id: 'so101-leader', name: 'SO-101 Leader', type: 'Control Surface', url: 'http://localhost:9101' },
+      {
+        id: lekiwiConfig.deviceId,
+        name: 'LeKiwi Mobile Base',
+        type: 'Task Endpoint',
+        url: lekiwiConfig.baseUrl,
+      },
     ];
 
     const robots: Robot[] = [];
 
     for (const agent of configuredAgents) {
       try {
+        const isLeKiwi = agent.id === lekiwiConfig.deviceId;
         const [info, health, config] = await Promise.all([
-          this.getAgentInfo(agent.url),
-          this.getAgentHealth(agent.url, agent.id.startsWith('so101-') ? agent.id.replace('so101-', '') : undefined).catch((err) => {
-            console.warn(`[Fleet API] Failed to get health for ${agent.url}:`, err);
-            return null;
-          }),
-          // Try to get config for Reachy agent
-          agent.id === 'reachy-001' 
+          isLeKiwi ? Promise.resolve(null) : this.getAgentInfo(agent.url),
+          isLeKiwi
+            ? this.getLeKiwiHealth(agent.url).catch((err) => {
+                console.warn(`[Fleet API] Failed to get LeKiwi health for ${agent.url}:`, err);
+                return null;
+              })
+            : this.getAgentHealth(agent.url, agent.id.startsWith('so101-') ? agent.id.replace('so101-', '') : undefined).catch((err) => {
+                console.warn(`[Fleet API] Failed to get health for ${agent.url}:`, err);
+                return null;
+              }),
+          agent.id === 'reachy-001'
             ? this.getAgentConfig(agent.url).catch(() => null)
             : Promise.resolve(null),
         ]);
 
         // Determine status from health and hardware config
         let status: Robot['status'] = 'OFFLINE';
-        const hardwareEnabled = config ? !config.current_mocked : undefined;
+        const hardwareEnabled = config ? !config.runtime.current_mocked : undefined;
         
         if (health) {
-          // Normalize status to lowercase for comparison (API returns lowercase strings)
-          const healthStatus = String(health.status || '').toLowerCase();
-          const sensorsRaw = health.sensors_ok;
-          const actuatorsRaw = health.actuators_ok;
-          const sensorsApplicable = sensorsRaw !== null && sensorsRaw !== undefined;
-          const actuatorsApplicable = actuatorsRaw !== null && actuatorsRaw !== undefined;
-          const sensorsOk = sensorsApplicable ? Boolean(sensorsRaw) : true;
-          const actuatorsOk = actuatorsApplicable ? Boolean(actuatorsRaw) : true;
-          
-          if (healthStatus === 'online') {
-            // Check hardware mode for Reachy agent
-            if (agent.id === 'reachy-001' && hardwareEnabled !== undefined) {
-              if (!hardwareEnabled) {
-                // Hardware disabled - SIM mode
-                status = 'SIM';
-              } else if (!sensorsOk || !actuatorsOk) {
-                // Hardware enabled but not connected - FALLBACK mode
-                status = 'FALLBACK';
+          if (isLeKiwi) {
+            const lekiwiStatus = String((health as LeKiwiHealth).status || '').toUpperCase();
+            status = lekiwiStatus === 'READY' ? 'READY' : 'DEGRADED';
+          } else {
+            const typedHealth = health as HealthStatus;
+            // Normalize status to lowercase for comparison (API returns lowercase strings)
+            const healthStatus = String(typedHealth.status || '').toLowerCase();
+            const sensorsRaw = typedHealth.sensors_ok;
+            const actuatorsRaw = typedHealth.actuators_ok;
+            const sensorsApplicable = sensorsRaw !== null && sensorsRaw !== undefined;
+            const actuatorsApplicable = actuatorsRaw !== null && actuatorsRaw !== undefined;
+            const sensorsOk = sensorsApplicable ? Boolean(sensorsRaw) : true;
+            const actuatorsOk = actuatorsApplicable ? Boolean(actuatorsRaw) : true;
+
+            if (healthStatus === 'online') {
+              // Check hardware mode for Reachy agent
+              if (agent.id === 'reachy-001' && hardwareEnabled !== undefined) {
+                if (!hardwareEnabled) {
+                  // Hardware disabled - SIM mode
+                  status = 'SIM';
+                } else if (!sensorsOk || !actuatorsOk) {
+                  // Hardware enabled but not connected - FALLBACK mode
+                  status = 'FALLBACK';
+                } else {
+                  // Hardware enabled and connected - READY
+                  status = 'READY';
+                }
+              } else if (sensorsOk && actuatorsOk) {
+                status = 'READY';
+              } else if ((sensorsApplicable && !sensorsOk) || (actuatorsApplicable && !actuatorsOk)) {
+                // Online but applicable checks failed
+                status = 'DEGRADED';
               } else {
-                // Hardware enabled and connected - READY
+                // Online with non-applicable checks (leader/camera)
                 status = 'READY';
               }
-            } else if (sensorsOk && actuatorsOk) {
-              status = 'READY';
-            } else if ((sensorsApplicable && !sensorsOk) || (actuatorsApplicable && !actuatorsOk)) {
-              // Online but applicable checks failed
+            } else if (healthStatus === 'degraded') {
               status = 'DEGRADED';
             } else {
-              // Online with non-applicable checks (leader/camera)
-              status = 'READY';
+              status = 'OFFLINE';
             }
-          } else if (healthStatus === 'degraded') {
-            status = 'DEGRADED';
-          } else {
-            status = 'OFFLINE';
           }
         } else {
           // If health endpoint failed but info endpoint succeeded, agent is reachable but health check failed
@@ -281,7 +324,7 @@ class FleetApiService {
 
         // Detect actual backend from settings (LM Studio, AIM, etc.)
         // Check localStorage for the configured backend
-        let detectedBackend = info.backend_default.toUpperCase();
+        let detectedBackend = info?.backend_default ? info.backend_default.toUpperCase() : 'LOCAL';
         try {
           const settingsStr = localStorage.getItem('multiverse-settings');
           if (settingsStr) {
@@ -331,10 +374,10 @@ class FleetApiService {
           type: agent.type,
           status,
           backend: detectedBackend,
-          capabilities: info.capabilities,
+          capabilities: info?.capabilities ?? ['lekiwi.move_base', 'lekiwi.stop', 'so101.move_pose_sequence'],
           url: agent.url,
           health: health || undefined,
-          info,
+          info: info ?? undefined,
           hardwareEnabled,
         });
       } catch (error) {

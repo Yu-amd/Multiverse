@@ -69,7 +69,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 9001
 ### Run LeKiwi Agent
 ```bash
 cd agents/lekiwi-agent
-uvicorn app.main:app --host 0.0.0.0 --port 9002
+python run.py
+```
+
+### Configure LeKiwi in the UI
+```bash
+export LEKIWI_BASE_URL=http://lekiwi-01.local:8008
+export LEKIWI_DEVICE_ID=lekiwi-01
 ```
 
 ### Run SO-101 Agent

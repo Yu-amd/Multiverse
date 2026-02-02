@@ -1,0 +1,28 @@
+{
+  "name": "lekiwi_example",
+  "poses": [
+    {
+      "pose": {
+        "arm_shoulder_pan": 0.0,
+        "arm_shoulder_lift": 0.0,
+        "arm_elbow_flex": 0.0,
+        "arm_wrist_flex": 0.0,
+        "arm_wrist_roll": 0.0,
+        "arm_gripper": 10.0
+      },
+      "hold_s": 0.5
+    },
+    {
+      "pose": {
+        "arm_shoulder_pan": 5.0,
+        "arm_shoulder_lift": 0.0,
+        "arm_elbow_flex": 0.0,
+        "arm_wrist_flex": 0.0,
+        "arm_wrist_roll": 0.0,
+        "arm_gripper": 10.0
+      },
+      "hold_s": 0.5
+    }
+  ]
+}
+

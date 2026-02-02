@@ -1,0 +1,16 @@
+[Unit]
+Description=LeKiwi Agent
+After=network.target
+
+[Service]
+Type=simple
+User=raspberry
+WorkingDirectory=/home/raspberry/Multiverse/agents/lekiwi-agent
+Environment=LEKIWI_CONFIG=/home/raspberry/Multiverse/agents/lekiwi-agent/config.yaml
+ExecStart=/usr/bin/python3 /home/raspberry/Multiverse/agents/lekiwi-agent/run.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+

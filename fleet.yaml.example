@@ -1,0 +1,6 @@
+endpoints:
+  - type: lekiwi
+    name: lekiwi-01
+    base_url: http://lekiwi-01.local:8008
+    device_id: lekiwi-01
+

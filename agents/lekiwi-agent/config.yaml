@@ -1,0 +1,5 @@
+device_id: kiwi
+robot_port: /dev/ttyACM0
+api_port: 8008
+sequence_dir: /home/raspberry/Multiverse/assets/motions
+
